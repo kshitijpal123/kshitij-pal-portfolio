@@ -26,6 +26,7 @@ for the problem being solved.
 | Content       | Engineering writing and project case studies as local MDX. | MDX compilation configured     |
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
+| Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
 
 Planned integrations, none implemented yet: error monitoring (Sentry),
@@ -51,11 +52,13 @@ app/                 layout.tsx (global shell), page.tsx (placeholder), globals.
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
+components/motion/   Reveal, Stagger, StaggerItem, MotionScope
 lib/site/            config.ts (identity, nav, links), isActivePath.ts
 lib/theme/           preference.ts (theme storage and init script)
+lib/motion/          tokens.ts, variants.ts (Motion for React values)
 lib/utils/           cx.ts (class-name joining)
 mdx-components.tsx   Global MDX component mapping
-tests/               setup.ts, app/, components/, lib/
+tests/               setup.ts, helpers/, app/, components/, lib/
 docs/                architecture/, adr/
 ```
 
@@ -104,9 +107,10 @@ bottom of short pages. The shell adds no width or vertical spacing to
 `<main>`: each page chooses its own `Container` size and `Section` rhythm.
 The header is in normal document flow (not sticky).
 
-Everything is a Server Component except three small Client Components in
-`components/navigation/`: `NavLink` (reads the pathname for the active item),
-`MobileNav` (menu open state), and `ThemeSwitcher` (theme preference).
+Everything in the shell is a Server Component except three small Client
+Components in `components/navigation/`: `NavLink` (reads the pathname for the
+active item), `MobileNav` (menu open state), and `ThemeSwitcher` (theme
+preference).
 Identity, navigation items, social links, and the résumé path live in
 `lib/site/config.ts`; components never hard-code them. A social link or the
 résumé link renders only when its URL is set.
@@ -156,6 +160,15 @@ configuration files where the tool expects it.
 
 Tailwind CSS v4 with semantic design tokens in `app/globals.css`, supporting
 light and dark themes. See [`design-tokens.md`](design-tokens.md).
+
+## Motion
+
+Motion for React (`motion`) is the only animation library. Micro-interactions
+are CSS transitions on the existing primitives. Scroll reveals use the Client
+Components in `components/motion/`, which wrap Server Component children and
+are imported only by pages that use them; there is no app-wide motion
+provider and no page transitions. Reduced motion is handled centrally in
+`globals.css` and in `MotionScope`. See [`motion.md`](motion.md).
 
 ## Decisions
 

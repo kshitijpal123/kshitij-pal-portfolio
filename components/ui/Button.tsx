@@ -4,7 +4,7 @@ import { cx } from "@/lib/utils/cx";
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 
 const base =
-  "inline-flex min-h-11 items-center justify-center gap-inline rounded-control border px-4 text-body-sm font-medium transition-colors duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex min-h-11 items-center justify-center gap-inline rounded-control border px-4 text-body-sm font-medium transition-[color,background-color,border-color,translate] active:translate-y-px disabled:pointer-events-none disabled:opacity-50";
 
 const variants: Record<ButtonVariant, string> = {
   primary:

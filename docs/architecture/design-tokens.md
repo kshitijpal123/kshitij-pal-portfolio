@@ -22,8 +22,8 @@ All tokens are in `app/globals.css`, in three layers:
 3. **`@theme`** holds static scales: font weights, type, spacing, widths,
    radius.
 
-Tailwind's default color, font-size, font-weight, radius, and shadow scales
-are cleared, so only approved tokens generate utilities. Arbitrary values (`bg-[#…]`) are
+Tailwind's default color, font-size, font-weight, radius, shadow, and easing
+scales are cleared, so only approved tokens generate utilities. Arbitrary values (`bg-[#…]`) are
 not used.
 
 ## Color
@@ -135,6 +135,14 @@ prose width.
   when justified). No pill shapes by default.
 - **Shadow**: `shadow-subtle` and `shadow-elevated` only, plus
   `shadow-none`. Borders separate content first; shadows are the exception.
+
+## Motion
+
+Durations (`--duration-instant`, `-fast`, `-normal`, `-slow`: 100, 150, 300,
+450 ms) and easings (`ease-standard`, `ease-emphasized`) live in `@theme`.
+Tailwind's default easings are cleared, and every `transition-*` utility
+defaults to `fast` with `standard`. Values, usage, and the motion primitives
+are in [`motion.md`](motion.md).
 
 ## Layout and responsive
 

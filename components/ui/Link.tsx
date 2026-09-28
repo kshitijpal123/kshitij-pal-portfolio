@@ -25,11 +25,7 @@ type LinkProps = ComponentProps<typeof NextLink> & {
 export function Link({ variant = "inline", className, ...props }: LinkProps) {
   return (
     <NextLink
-      className={cx(
-        "transition-colors duration-150",
-        variants[variant],
-        className,
-      )}
+      className={cx("transition-colors", variants[variant], className)}
       {...props}
     />
   );

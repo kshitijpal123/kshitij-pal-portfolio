@@ -45,7 +45,7 @@ export function ThemeSwitcher() {
         {options.map((option) => (
           <label
             key={option.value}
-            className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-2.5 text-caption text-muted-foreground transition-colors duration-150 hover:text-foreground has-checked:bg-muted has-checked:font-medium has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring"
+            className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-2.5 text-caption text-muted-foreground transition-colors hover:text-foreground has-checked:bg-muted has-checked:font-medium has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring"
           >
             <input
               type="radio"

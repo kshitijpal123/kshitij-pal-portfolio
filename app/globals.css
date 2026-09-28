@@ -51,7 +51,7 @@
 }
 
 /*
- * Default color, type, radius, and shadow scales are cleared so only the
+ * Default color, type, radius, shadow, and easing scales are cleared so only the
  * approved tokens generate utilities. Spacing multipliers, containers, and
  * breakpoints keep Tailwind's defaults.
  */
@@ -149,6 +149,24 @@
   --radius-control: 0.375rem;
   --radius-container: 0.5rem;
   --radius-surface: 0.75rem;
+
+  /*
+   * Motion. See docs/architecture/motion.md. Motion for React reads the same
+   * values from lib/motion/tokens.ts; a test keeps the two in sync.
+   * Every `transition-*` utility defaults to `fast` + `standard`; deviate
+   * with `duration-(--duration-normal)` or `ease-emphasized`.
+   */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 450ms;
+
+  --ease-*: initial;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-standard);
 }
 
 @layer base {
@@ -199,6 +217,10 @@
   }
 }
 
+/*
+ * CSS animations and transitions become instant. Motion for React animations
+ * are handled separately by components/motion/MotionScope.tsx.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
@@ -207,5 +229,16 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Reveal content is server-rendered in its hidden starting state. Without
+ * scripting it would never animate in, so show it.
+ */
+@media (scripting: none) {
+  [data-motion-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

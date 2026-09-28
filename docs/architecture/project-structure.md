@@ -80,6 +80,7 @@ first component is written.
 | `components/ui/`          | Reusable low-level UI primitives |
 | `components/layout/`      | Shared layout structures         |
 | `components/navigation/`  | Header and navigation components |
+| `components/motion/`      | Motion primitives                |
 | `components/hero/`        | Hero-specific components         |
 | `components/experience/`  | Experience-specific components   |
 | `components/work/`        | Project / case-study components  |
@@ -99,6 +100,10 @@ a link button styling without making it a button. Class names are joined with
 `components/navigation/` holds `DesktopNav`, `MobileNav`, `NavLink`,
 `ThemeSwitcher`, `ResumeLink`, and `SkipLink`. They are composed once in
 `app/layout.tsx`; see "Global shell" in [`overview.md`](overview.md).
+
+`components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
+internal `MotionScope`. They are thin Client Components that accept Server
+Component children; see [`motion.md`](motion.md).
 
 Rules:
 
@@ -120,6 +125,7 @@ written.
 | `lib/analytics/` | Analytics integration helpers                        |
 | `lib/site/`      | Site configuration (identity, navigation, links)     |
 | `lib/theme/`     | Theme preference storage and initialization          |
+| `lib/motion/`    | Motion tokens and shared Motion for React variants   |
 | `lib/utils/`     | Small reusable utilities that don't belong elsewhere |
 
 `lib/utils/` is a last resort. Code that belongs to a domain (content, SEO,
@@ -181,11 +187,14 @@ links appear only once it is set.
 | `tests/app/`        | Routes in `app/`            | Exists (root page) |
 | `tests/components/` | Components in `components/` | Exists             |
 | `tests/lib/`        | Modules in `lib/`           | Exists             |
+| `tests/helpers/`    | Test-only utilities         | Exists             |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at
 `tests/components/work/ProjectCard.test.tsx`. Test files use the
 `*.test.ts` / `*.test.tsx` suffix. Shared setup lives in `tests/setup.ts`.
+`tests/helpers/` holds stand-ins for browser APIs that jsdom lacks, such as
+`intersectionObserver.ts`, imported by the tests that need them.
 
 ## Imports
 
