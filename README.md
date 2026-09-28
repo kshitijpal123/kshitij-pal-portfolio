@@ -26,6 +26,8 @@ studies and engineering writing.
 | Deployment | AWS (planned)                           |
 
 There is no database, CMS, authentication, or separate backend service.
+Monitoring (Sentry), analytics (Google Analytics), and the contact form
+(Resend) are planned and not yet implemented.
 
 ## Architecture
 
@@ -59,8 +61,8 @@ npm run dev          # start the dev server at http://localhost:3000
 | `npm run format`       | Format files with Prettier                  |
 | `npm run format:check` | Verify formatting (used in CI)              |
 
-Local environment variables go in `.env.local`, which is git-ignored. None are
-required at present.
+No environment variables are required. They will be introduced only when a
+feature requires them; local values go in `.env.local`, which is git-ignored.
 
 ## Project structure
 

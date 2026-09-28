@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Status: application structure defined (Milestone 1.2). This document describes
+Status: foundation complete (Milestone 1). This document describes
 the intended shape of the system and what exists today. It is updated as parts
 are implemented.
 
@@ -27,6 +27,11 @@ for the problem being solved.
 | UI components | Reusable presentational components, grouped by domain.     | Conventions defined; none yet  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Neutral token foundation only  |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
+
+Planned integrations, none implemented yet: error monitoring (Sentry),
+analytics (Google Analytics), and contact form delivery (Resend). Full SEO,
+accessibility, and performance work are later milestones. Environment
+variables are introduced only when a feature requires them; none exist today.
 
 ## Principles
 

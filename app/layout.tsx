@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Portfolio",
+  title: "Backend Engineer",
   description:
-    "Backend Engineer building production-oriented systems with Node.js and TypeScript.",
+    "I specialize in Node.js and TypeScript, building backend systems and APIs with a focus on architecture, reliability, and real-world engineering constraints.",
 };
 
 export default function RootLayout({

@@ -31,6 +31,8 @@ before making changes.
 - Prefer simple solutions. No premature abstraction or placeholder files.
 - Avoid unnecessary dependencies; justify any new one.
 - Use the `@/*` import alias; no `../` climbing.
+- Add environment variables only when a feature requires them; never commit
+  secrets or `.env` files.
 
 ## Code quality
 

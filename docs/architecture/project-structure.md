@@ -1,6 +1,6 @@
 # Project Structure and Conventions
 
-Status: Milestone 1.2. This document defines where code and content live and
+Status: Milestone 1. This document defines where code and content live and
 how files are named. Directories listed here are created when they first hold
 a real file; an empty directory is not tracked by Git and is not a problem.
 
