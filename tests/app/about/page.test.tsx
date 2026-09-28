@@ -67,6 +67,16 @@ describe("AboutPage", () => {
     ).toEqual(["Backend Systems", "Cloud", "Distributed Systems"]);
   });
 
+  it("describes the progression across all three roles", () => {
+    render(<AboutPage />);
+
+    const text = getSection("About").getByText(/The 10x Academy/).textContent;
+    expect(text).toMatch(/started with full-stack development/);
+    expect(text).toContain("Digicorp Information Systems");
+    expect(text).toContain("Khaitan & Co");
+    expect(document.body.textContent).not.toMatch(/Express\.js/);
+  });
+
   it("describes the engineering focus", () => {
     render(<AboutPage />);
 

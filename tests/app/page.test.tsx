@@ -26,7 +26,7 @@ describe("HomePage", () => {
       regions.map((region) => region.getAttribute("aria-labelledby")),
     ).toEqual([
       "home-hero-heading",
-      "experience-heading",
+      "journey-heading",
       "current-work-heading",
       "connect-heading",
     ]);
@@ -35,7 +35,7 @@ describe("HomePage", () => {
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
     ).toEqual([
-      "Experience",
+      "Engineering Journey",
       "Currently Working On",
       "Let's build something useful.",
     ]);

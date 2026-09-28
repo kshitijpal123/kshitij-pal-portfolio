@@ -1,9 +1,8 @@
 # Motion
 
-Status: Milestone 2.5 (motion language). This document defines how things
-move and the primitives that implement it. The Home page Experience section
-is the first to use them: a `Reveal` for its heading and a `Stagger` over its
-entries. Responsibility bullets are not staggered individually.
+Status: Milestone 2.5 (motion language), extended in Milestone 6.5 (Home
+engineering journey). This document defines how things move and the
+primitives that implement it.
 
 ## Principle
 
@@ -136,11 +135,10 @@ static; paragraphs, headings, and code blocks never animate. The closing
 
 ### Experience and About pages
 
-The Experience page header, role column, summary, and responsibilities are
-static: the first role is on screen at first paint. The technology groups
-are one `Reveal` (`ExperienceRole` with `revealTechnologies`), and the
-closing `ExperienceNav` is one `Reveal`. On Home, where the whole entry is
-already a `StaggerItem`, the technology groups are not revealed again.
+The Experience page header, role column, summary, progression, and
+sections are static: the first role is on screen at first paint. Each role's
+technology list is one `Reveal`, and the closing `ExperienceNav` is one
+`Reveal`. The page does not reuse the Home trajectory or its motion.
 
 The About header, including the portrait when set, is static because it is
 above the fold. Each `AboutSection` heading is a `Reveal`, like a case-study
@@ -284,14 +282,61 @@ supports the heading by showing how the engineer thinks about systems.
 - If `siteConfig.portrait` is set, the portrait takes the right column
   instead of the visual.
 
+### Home engineering journey
+
+`ExperienceSection` reveals its heading with a `Reveal`, its milestones with
+one `Stagger`, and the current trajectory with a `Reveal`, like any Home
+section. From `lg`, `components/experience/JourneyTrajectory.tsx` adds the
+Level 3 entrance: an ascending line through the stages, the current stage
+ringed, and a dashed continuation into the current trajectory (see "Home
+journey" in [`project-structure.md`](project-structure.md) for layout and
+why it is abstract rather than literal space imagery).
+
+- **Once, on entering the viewport.** No loop and no scroll-linked motion:
+  1. The line to the current stage is revealed left to right (`slow`,
+     linear), and the past stages rise 4px into place as it reaches them.
+  2. An accent indicator travels from the first stage to the current one,
+     one `hop` per stage, with an accent line drawn behind it.
+  3. On arrival, the current stage's rings settle in (opacity and a 0.85 →
+     1 scale), and the dashed continuation extends to the current
+     trajectory marker.
+
+  About 1.8 s in all. Text never waits: the milestone list reveals with the
+  standard stagger, independently of the drawing.
+
+- **Why viewport-triggered rather than scroll-driven.** Tying progress to
+  scroll position would leave the line half drawn wherever the reader
+  stops, and depend on how far the page can scroll; it would also be the
+  first scroll-linked motion in a system that has none. Normal scrolling is
+  never intercepted and nothing is sticky.
+- **Rendering.** Inline SVG (`viewBox` 1200 × 200, scaled uniformly), token
+  classes only (`stroke-border`, `stroke-border-strong`, `stroke-accent`,
+  `fill-background`, `fill-foreground`, `fill-accent`). Line reveals are
+  `clipPath` rectangles sliding by `transform`, not `pathLength`, so the
+  animated values are transforms and opacity only. The indicator rests on
+  the current stage and is offset back while hidden; its keyframes are
+  spaced evenly in x, matching the linear sweep of its line.
+- **No script.** Every animated part carries `data-motion-reveal`, so the
+  `scripting: none` rule shows the finished drawing: sweeps and the
+  indicator sit at their final position when transforms are removed.
+- **Reduced motion.** `useReducedMotionConfig()` makes every transition
+  instant: no drawing, no moving indicator, no rise or scale. The complete,
+  static trajectory appears as soon as it is on screen. The preference only
+  changes transitions, never the first render, so server and client markup
+  match.
+- **Accessibility.** The wrapper is `aria-hidden="true"` and the SVG is
+  `focusable="false"`, with no text: the milestone list states everything
+  the drawing shows, including which role is current ("Present").
+
 ## Performance
 
 - Animate `transform` and `opacity` only. Never layout properties, and
   never `box-shadow` or `filter`.
 - Motion code loads only on pages that render a primitive, and only the
   `domAnimation` feature set.
-- Viewport-triggered, once. Nothing animates while off screen. The only
-  continuous animation is the hero visual's flow: two SVG circles moving by
+- Viewport-triggered, once. Nothing animates while off screen. The journey
+  trajectory runs once. The only continuous animation is the hero visual's
+  flow: two SVG circles moving by
   `transform`, resting 5 s per cycle, stopped off screen and under reduced
   motion.
 - Transforms do not affect layout, so reveals cause no layout shift.

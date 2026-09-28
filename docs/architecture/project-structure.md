@@ -29,9 +29,9 @@ Project code lives outside `app/`. `app/` contains only routing files
 
 Exists:
 
-- `/` (`app/page.tsx`), the Home page. It renders the hero, the Experience
-  section, the Currently Working On section, and the Let's Connect call to
-  action, in that order.
+- `/` (`app/page.tsx`), the Home page. It renders the hero, the Engineering
+  Journey (experience) section, the Currently Working On section, and the
+  Let's Connect call to action, in that order.
 - `/work` (`app/work/page.tsx`), the project index. It lists every project in
   `lib/content/projects.ts` and has no per-project code.
 - `/work/[slug]` (`app/work/[slug]/page.tsx`), a project case study. It is
@@ -46,8 +46,8 @@ Exists:
   `dynamicParams = false` makes every other slug, drafts included, return 404. The page also calls `notFound()` when the registry has no published
   article for the slug.
 - `/experience` (`app/experience/page.tsx`), the detailed professional
-  record. It renders every entry in `lib/site/experience.ts`, the same data
-  as the Home Experience section, and closes with `ExperienceNav`.
+  record. It renders every entry in `lib/site/experience.ts`, newest first,
+  the same data as the Home journey, and closes with `ExperienceNav`.
 - `/about` (`app/about/page.tsx`), the About page. It renders
   `content/about/index.mdx` and closes with `AboutNav`.
 - `/contact` (`app/contact/page.tsx`), the Contact page: introduction,
@@ -135,22 +135,63 @@ above the fold and its copy must render fully without JavaScript. Only
 `TechnicalHeroVisual` is a Client Component; it is decorative and animates
 itself (see "Home hero visual" in [`motion.md`](motion.md)).
 
-`components/experience/` holds `ExperienceSection`, the Home page
-professional timeline. It renders the typed entries in `lib/site/experience.ts`
-(most recent first) and reveals them with the motion primitives, since it sits
-below the fold. Entries are structured data, not MDX. A role's `period` is set
-only from verified dates and is not rendered while unset.
+**Experience data.** `lib/site/experience.ts` is the only source of
+experience data; no page or component repeats a company, role, or date. Each
+`ExperienceEntry` has an `id`, `company`, `shortName` (Home), `role`,
+`employmentType`, `startDate` and `endDate` (`YYYY-MM`; `endDate: null`
+while current), optional `location` (omitted when none is verified),
+`workMode`, `summary`, `progression` (`label` and `statement`), titled
+`sections` of items, and verified `technologies` (empty when none are
+verified for the role). Durations are never stored: a completed role's
+duration is derived from its dates (inclusive months), and a current role
+shows none, because prerendered pages would let it go stale. Dates format by
+hand ("May 2021"), never with `Intl`. The module exports `experience`
+(oldest first) and `experienceNewestFirst`, both sorted by `startDate`, plus
+`currentTrajectory`, the areas the Home journey continues into (focus areas,
+not job titles). To change the experience shown anywhere, edit this file.
 
-`lib/site/experience.ts` is the only source of experience data. Both the
-Home section and the `/experience` page render each entry with
-`ExperienceRole`: role, company, location, and period (when set) in the first
-column; summary, responsibilities, and technology groups in the other two.
-Its `headingLevel` makes the role an h3 on Home (under the section h2) and an
-h2 on `/experience` (under the page h1); sub-headings sit one level below.
-Technology groups are listed by label with no ratings or levels.
-`ExperienceNav` closes the Experience page: the résumé download (only while
-`siteConfig.resumeHref` is set), About, and Let's connect. To change the
-experience shown on either page, edit `lib/site/experience.ts`.
+**Anchors.** Each role's `id` is its stable anchor on `/experience`
+(`#khaitan-co`, `#digicorp`, `#10x-academy`): kebab-case, derived from the
+company, and never changed once published, so links and future structured
+data can rely on it. `experienceHref(entry)` builds `/experience#<id>`.
+
+`components/experience/` holds:
+
+| Component           | Role                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ExperienceSection` | Home "Engineering Journey": heading, `JourneyTrajectory`, the milestone list, a link to `/experience` |
+| `JourneyTrajectory` | Client Component: the decorative desktop trajectory SVG (see [`motion.md`](motion.md))                |
+| `JourneyMilestone`  | One Home stage: period, company (h3, linked to its anchor), role, progression                         |
+| `JourneyMarker`     | A stage marker on the vertical rail below `lg` (past, current, or next)                               |
+| `ExperienceRole`    | One `/experience` role on the three-column grid                                                       |
+| `ExperiencePeriod`  | "May 2021 – Nov 2021" / "Jun 2024 – Present" with `<time dateTime="YYYY-MM">`                         |
+| `ExperienceNav`     | Closing navigation: résumé download (only while `resumeHref` is set), About, Let's connect            |
+
+**Home journey.** Chronological, oldest to newest, as the trajectory reads
+left to right. It is one `<ol>` of milestones followed by the current
+trajectory ("Backend · Cloud · Distributed Systems"), so the history is
+complete as text; the drawn parts are `aria-hidden`. From `lg` the stages sit
+in four equal columns (three stages and the current trajectory) under
+`JourneyTrajectory`, whose stage positions sit on each column's left edge;
+the grid assumes three stages. Below `lg` the same list becomes a vertical
+rail with `JourneyMarker`s, and the SVG is not displayed. Home shows no
+responsibilities or technologies; it ends with "View full experience".
+
+The trajectory is abstract on purpose. The idea behind it (launch,
+trajectory, milestones, current destination) borrows from space flight, but
+it is drawn as an engineering plot: a line, nodes, rings, and a baseline in
+the design tokens. Literal rockets, planets, or star fields would read as a
+theme rather than engineering and would clash with the editorial system.
+
+**Experience page.** Newest first. Each role is an `<li id>` on the Home
+three-column grid, separated by dividers, not cards. The first column holds
+"Current" (current role only), the period, and the derived duration; the h2
+(role, then company on its own line, with a visually hidden comma so the
+heading reads "Backend Developer, Khaitan & Co"); and a term list of
+employment, location (when set), and work mode. The other two columns hold
+the summary, the engineering progression (an h3 over the label and
+statement, set off by an accent rule), one h3 and list per section, and the
+technologies as a dotted inline list with no ratings or badges.
 
 `components/about/` holds the About page layout; its prose lives in
 `content/about/index.mdx`.
@@ -170,7 +211,7 @@ a portrait is added above it with no layout change.
 `components/work/` holds `CurrentWorkSection`, the Home page "Currently
 Working On" section. It renders the typed items in `lib/site/currentWork.ts`;
 an item links to its case study only when `href` is set. From `lg` it shares
-the Experience section's three-column grid (heading in the first column,
+the Engineering Journey heading's three-column grid (heading in the first column,
 content in the other two), so both sections align on one editorial axis and
 the project reads as current work rather than a feature block. Its link to
 `/work/billsync` opens the BillSync case study.
@@ -397,7 +438,9 @@ each section's h2 comes from `AboutSection`. The route's title and
 description are in `app/about/page.tsx`.
 
 Everything on the page is stated from verified information: the approved
-positioning and the role in `lib/site/experience.ts`. "Currently Exploring"
+positioning and the roles in `lib/site/experience.ts`. The introduction
+summarizes the progression across all three roles in one paragraph and
+links to Experience for the details. "Currently Exploring"
 lists areas of study, not claims of expertise. There is no personal or
 "outside the code" section; add one only with real details provided by the
 owner.

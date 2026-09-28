@@ -1,6 +1,7 @@
 # Architecture Overview
 
-Status: Contact page and form delivery complete (Milestone 7). This document
+Status: Experience journey evolved (Milestone 6.5) after the contact page
+and form delivery (Milestone 7). This document
 describes the intended shape of the system and what exists today. It is
 updated as parts are implemented.
 
@@ -58,7 +59,9 @@ app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
                      api/contact/route.ts (contact form endpoint)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
-components/experience/  ExperienceSection, ExperienceRole, ExperienceNav
+components/experience/  ExperienceSection (Home journey), JourneyTrajectory,
+                     JourneyMilestone, JourneyMarker, ExperienceRole,
+                     ExperiencePeriod, ExperienceNav
 components/about/    AboutHeader, AboutSection, AboutNav
 components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
@@ -164,9 +167,10 @@ Work pages. Engineering articles follow the same split (`article.ts` beside
 `published`/`draft` status: drafts are validated but never listed, routed,
 or prerendered. The About page body is a single MDX file,
 `content/about/index.mdx`; it has no metadata module or registry. The
-Experience page has no content file of its own: it renders the same
-`lib/site/experience.ts` entries as the Home page. Details: "Content" in
-[`project-structure.md`](project-structure.md).
+Experience page has no content file of its own: `lib/site/experience.ts` is
+the single source of experience data, rendered oldest first as the Home
+"Engineering Journey" and newest first as the `/experience` record. Details:
+"Content" in [`project-structure.md`](project-structure.md).
 
 ## Contact form
 

@@ -4,7 +4,7 @@ import { ExperienceRole } from "@/components/experience/ExperienceRole";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
 import { siteConfig } from "@/lib/site/config";
-import { experience } from "@/lib/site/experience";
+import { experienceNewestFirst } from "@/lib/site/experience";
 
 export const metadata: Metadata = {
   title: `Experience · ${siteConfig.name}`,
@@ -32,8 +32,8 @@ export default function ExperiencePage() {
             Experience
           </h1>
           <p className="mt-6 max-w-measure text-body-lg text-muted-foreground">
-            A detailed look at my backend engineering experience,
-            responsibilities, and technical work.
+            A detailed look at my backend engineering journey, responsibilities,
+            and technical work.
           </p>
         </Container>
       </Section>
@@ -41,16 +41,13 @@ export default function ExperiencePage() {
       <Section aria-label="Roles" className="border-t border-border">
         <Container>
           <ol className="divide-y divide-border">
-            {experience.map((entry) => (
+            {experienceNewestFirst.map((entry) => (
               <li
-                key={`${entry.company}-${entry.role}`}
-                className="grid gap-8 py-10 first:pt-0 last:pb-0 lg:grid-cols-3 lg:gap-12 lg:py-12"
+                key={entry.id}
+                id={entry.id}
+                className="grid scroll-mt-8 gap-8 py-12 first:pt-0 last:pb-0 lg:grid-cols-3 lg:gap-12 lg:py-16"
               >
-                <ExperienceRole
-                  entry={entry}
-                  headingLevel={2}
-                  revealTechnologies
-                />
+                <ExperienceRole entry={entry} />
               </li>
             ))}
           </ol>
