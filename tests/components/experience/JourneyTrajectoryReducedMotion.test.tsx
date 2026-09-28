@@ -38,4 +38,18 @@ describe("JourneyTrajectory with prefers-reduced-motion", () => {
       { timeout: 300 },
     );
   });
+
+  it("keeps the current marker's rings static and visible", async () => {
+    const { container } = render(<JourneyTrajectory />);
+    const pulse = container.querySelector("[data-journey-pulse]");
+    expect(pulse).not.toBeNull();
+
+    enterViewport();
+
+    // Past the point the pulse would begin (about 2.1s) with motion allowed.
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    expect(pulse).toHaveStyle({ opacity: "0.7" });
+    expect(pulse?.getAttribute("style") ?? "").not.toMatch(/scale\((?!1\))/);
+    expect(container.querySelector('circle[r="17"]')).toBeInTheDocument();
+  }, 5000);
 });

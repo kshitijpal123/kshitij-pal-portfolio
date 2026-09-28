@@ -121,6 +121,36 @@ const indicatorVariants: Variants = {
   }),
 };
 
+/**
+ * The current stage's outer ring breathes once the indicator has arrived, to
+ * show the trajectory is still active. It loops only while on screen and
+ * rests at `rest` under reduced motion or without script.
+ */
+export const livePulse = {
+  duration: 2.8,
+  scale: [1, 1.08, 1],
+  opacity: [0.7, 0.25, 0.7],
+} as const;
+
+export const livePulseVariants: Variants = {
+  rest: { opacity: livePulse.opacity[0], scale: 1 },
+  live: ({ delay, reduce }: Timing) =>
+    reduce
+      ? { opacity: livePulse.opacity[0], scale: 1, transition: instant }
+      : {
+          opacity: [...livePulse.opacity],
+          scale: [...livePulse.scale],
+          transition: {
+            delay,
+            duration: livePulse.duration,
+            ease: "easeInOut",
+            repeat: Infinity,
+          },
+        },
+};
+
+const livePulseViewport = { once: false, amount: "some" } as const;
+
 function Stage({ x, timing }: { x: number; timing: Timing }) {
   const y = trajectoryY(x);
 
@@ -267,7 +297,13 @@ function Trajectory() {
         custom={at(arrival, duration.normal)}
         variants={emphasisVariants}
       >
-        <circle
+        <m.circle
+          data-journey-pulse=""
+          custom={at(arrival + duration.normal, livePulse.duration)}
+          variants={livePulseVariants}
+          initial="rest"
+          whileInView="live"
+          viewport={livePulseViewport}
           cx={currentX}
           cy={currentY}
           r={28}

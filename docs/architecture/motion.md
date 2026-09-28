@@ -304,6 +304,14 @@ why it is abstract rather than literal space imagery).
   About 1.8 s in all. Text never waits: the milestone list reveals with the
   standard stagger, independently of the drawing.
 
+- **Live current stage.** After the rings settle, the current stage's outer
+  (dashed) ring breathes to show the trajectory is still active: scale
+  1 → 1.08 → 1 and opacity 0.7 → 0.25 → 0.7 over 2.8 s, `easeInOut`,
+  repeating. It is the only loop in the journey; the center dot, inner
+  ring, other stages, line, and text never loop. It runs only while the
+  trajectory is on screen, and rests at opacity 0.7 without script and
+  under reduced motion. The mobile rail marker is static.
+
 - **Why viewport-triggered rather than scroll-driven.** Tying progress to
   scroll position would leave the line half drawn wherever the reader
   stops, and depend on how far the page can scroll; it would also be the
@@ -335,8 +343,8 @@ why it is abstract rather than literal space imagery).
 - Motion code loads only on pages that render a primitive, and only the
   `domAnimation` feature set.
 - Viewport-triggered, once. Nothing animates while off screen. The journey
-  trajectory runs once. The only continuous animation is the hero visual's
-  flow: two SVG circles moving by
-  `transform`, resting 5 s per cycle, stopped off screen and under reduced
-  motion.
+  trajectory's entrance runs once. The only continuous animations are the
+  hero visual's flow (two SVG circles moving by `transform`, resting 5 s per
+  cycle) and the journey's current-stage ring (one SVG circle by `transform`
+  and opacity); both stop off screen and under reduced motion.
 - Transforms do not affect layout, so reveals cause no layout shift.
