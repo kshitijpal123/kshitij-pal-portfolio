@@ -27,8 +27,9 @@ Project code lives outside `app/`. `app/` contains only routing files
 
 ## Routes
 
-Exists: `/` (`app/page.tsx`), the Home page. It currently renders the hero
-followed by the Experience section.
+Exists: `/` (`app/page.tsx`), the Home page. It currently renders the hero,
+the Experience section, the Currently Working On section, and the Let's
+Connect call to action, in that order.
 
 Intended route map (not implemented; routes are added when their content
 exists):
@@ -111,6 +112,19 @@ professional timeline. It renders the typed entries in `lib/site/experience.ts`
 below the fold. Entries are structured data, not MDX. A role's `period` is set
 only from verified dates and is not rendered while unset.
 
+`components/work/` holds `CurrentWorkSection`, the Home page "Currently
+Working On" section. It renders the typed items in `lib/site/currentWork.ts`;
+an item links to its case study only when `href` is set. Its first link,
+`/work/billsync`, points at the intended case-study route and returns 404
+until that route exists, like the other intended routes already linked from
+the site.
+
+`components/contact/` holds `ConnectSection`, the Home page call to action
+that points to `/contact`. It is not the Contact page. Its LinkedIn link
+comes from `siteConfig.social` and renders only while that URL is set.
+
+Both sections sit below the fold and reveal with the motion primitives.
+
 `components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
 internal `MotionScope`. They are thin Client Components that accept Server
 Component children; see [`motion.md`](motion.md).
@@ -128,15 +142,15 @@ Rules:
 `lib/` holds non-UI code. Directories are created when their first module is
 written.
 
-| Directory        | Responsibility                                       |
-| ---------------- | ---------------------------------------------------- |
-| `lib/content/`   | MDX/content loading and content utilities            |
-| `lib/seo/`       | SEO metadata and structured-data helpers             |
-| `lib/analytics/` | Analytics integration helpers                        |
-| `lib/site/`      | Site configuration and structured data (experience)  |
-| `lib/theme/`     | Theme preference storage and initialization          |
-| `lib/motion/`    | Motion tokens and shared Motion for React variants   |
-| `lib/utils/`     | Small reusable utilities that don't belong elsewhere |
+| Directory        | Responsibility                                                    |
+| ---------------- | ----------------------------------------------------------------- |
+| `lib/content/`   | MDX/content loading and content utilities                         |
+| `lib/seo/`       | SEO metadata and structured-data helpers                          |
+| `lib/analytics/` | Analytics integration helpers                                     |
+| `lib/site/`      | Site configuration and structured data (experience, current work) |
+| `lib/theme/`     | Theme preference storage and initialization                       |
+| `lib/motion/`    | Motion tokens and shared Motion for React variants                |
+| `lib/utils/`     | Small reusable utilities that don't belong elsewhere              |
 
 `lib/utils/` is a last resort. Code that belongs to a domain (content, SEO,
 analytics) lives in that domain's directory.

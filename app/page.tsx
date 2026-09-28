@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { ConnectSection } from "@/components/contact/ConnectSection";
 import { ExperienceSection } from "@/components/experience/ExperienceSection";
 import { HomeHero } from "@/components/hero/HomeHero";
+import { CurrentWorkSection } from "@/components/work/CurrentWorkSection";
 import { siteConfig } from "@/lib/site/config";
 
 export const metadata: Metadata = {
@@ -14,6 +16,8 @@ export default function HomePage() {
     <>
       <HomeHero />
       <ExperienceSection />
+      <CurrentWorkSection />
+      <ConnectSection />
     </>
   );
 }

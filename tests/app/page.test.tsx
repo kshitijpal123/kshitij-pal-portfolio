@@ -18,16 +18,27 @@ describe("HomePage", () => {
     );
   });
 
-  it("renders the experience section directly after the hero", () => {
+  it("renders hero, experience, current work, then connect", () => {
     render(<HomePage />);
 
     const regions = screen.getAllByRole("region");
     expect(
       regions.map((region) => region.getAttribute("aria-labelledby")),
-    ).toEqual(["home-hero-heading", "experience-heading"]);
+    ).toEqual([
+      "home-hero-heading",
+      "experience-heading",
+      "current-work-heading",
+      "connect-heading",
+    ]);
     expect(
-      screen.getByRole("heading", { level: 2, name: "Experience" }),
-    ).toBeInTheDocument();
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "Experience",
+      "Currently Working On",
+      "Let's build something useful.",
+    ]);
   });
 
   it("defines a page title and description", () => {
