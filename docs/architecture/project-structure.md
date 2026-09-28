@@ -86,11 +86,20 @@ first component is written.
 | `components/engineering/` | Engineering article components   |
 | `components/contact/`     | Contact-specific components      |
 
+`components/ui/` exists and holds the core primitives: `Button`, `Link`,
+`Container`, `Section`, `Surface`, `Badge`, and `Divider`. They style
+standard HTML elements with the tokens from
+[`design-tokens.md`](design-tokens.md), accept the element's normal props plus
+a few named variants, and append a `className` for layout additions (it does
+not override their styles). They carry no content. `buttonClassName()` gives
+a link button styling without making it a button. Class names are joined with
+`cx()` from `lib/utils/cx.ts`.
+
 Rules:
 
 - One focused component per file. No catch-all component files.
-- A component starts in the domain directory that uses it. It moves to `ui/`
-  only once a second, unrelated domain needs it.
+- Beyond the core primitives, a component starts in the domain directory that
+  uses it. It moves to `ui/` only once a second, unrelated domain needs it.
 - Do not create components, props, or variants before a page needs them.
 - No barrel (`index.ts`) re-export files; import components from their file.
 
@@ -156,11 +165,11 @@ in `content/`, not in `public/`.
 
 ## Tests
 
-| Directory           | Tests for                   | Status                  |
-| ------------------- | --------------------------- | ----------------------- |
-| `tests/app/`        | Routes in `app/`            | Exists (root page)      |
-| `tests/components/` | Components in `components/` | Created with first test |
-| `tests/lib/`        | Modules in `lib/`           | Created with first test |
+| Directory           | Tests for                   | Status             |
+| ------------------- | --------------------------- | ------------------ |
+| `tests/app/`        | Routes in `app/`            | Exists (root page) |
+| `tests/components/` | Components in `components/` | Exists (`ui/`)     |
+| `tests/lib/`        | Modules in `lib/`           | Exists (`utils/`)  |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at

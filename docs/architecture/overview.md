@@ -24,7 +24,7 @@ for the problem being solved.
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
 | App Router    | Routing, layouts, metadata. Server Components by default.  | Root layout and route in place |
 | Content       | Engineering writing and project case studies as local MDX. | MDX compilation configured     |
-| UI components | Reusable presentational components, grouped by domain.     | Conventions defined; none yet  |
+| UI components | Reusable presentational components, grouped by domain.     | Core primitives in `ui/`       |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
 
@@ -48,14 +48,16 @@ What exists today:
 
 ```
 app/                 layout.tsx, page.tsx (minimal placeholder), globals.css
+components/ui/       Core UI primitives (Button, Link, Container, ...)
+lib/utils/           cx.ts (class-name joining)
 mdx-components.tsx   Global MDX component mapping
-tests/               setup.ts, app/page.test.tsx
+tests/               setup.ts, app/, components/ui/, lib/utils/
 docs/                architecture/, adr/
 ```
 
-Everything else (`components/`, `content/`, `lib/`, `public/`, and further
-test directories) is defined by convention and created when it first holds a
-real file. Project code lives outside `app/`; `app/` contains routing files
+Everything else (other `components/` and `lib/` directories, `content/`,
+`public/`) is defined by convention and created when it first holds a real
+file. Project code lives outside `app/`; `app/` contains routing files
 only.
 
 | Path                 | Purpose                                                         |

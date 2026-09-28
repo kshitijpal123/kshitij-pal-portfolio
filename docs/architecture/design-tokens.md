@@ -1,7 +1,8 @@
 # Design Tokens
 
-Status: Milestone 2.2 (typography). Tokens are defined in `app/globals.css`;
-no components consume them yet. Nothing here is a component or page design.
+Status: Milestone 2.3 (core UI primitives). Tokens are defined in
+`app/globals.css` and consumed by the primitives in `components/ui/`. Nothing
+here is a component or page design.
 
 ## Principle
 
