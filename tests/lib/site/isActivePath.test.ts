@@ -11,6 +11,10 @@ describe("isActivePath", () => {
     ["/engineering", "/work", false],
     ["/workshop", "/work", false],
     ["/about", "/contact", false],
+    ["/experience", "/experience", true],
+    ["/experiences", "/experience", false],
+    ["/experience", "/about", false],
+    ["/about", "/experience", false],
   ] as const)("pathname %s with href %s is %s", (pathname, href, expected) => {
     expect(isActivePath(pathname, href)).toBe(expected);
   });

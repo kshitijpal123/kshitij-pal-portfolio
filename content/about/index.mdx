@@ -1,0 +1,64 @@
+import { AboutHeader } from "@/components/about/AboutHeader";
+import { AboutSection } from "@/components/about/AboutSection";
+
+<AboutHeader
+  profile={[
+    { label: "Role", items: ["Backend Engineer"] },
+    { label: "Specialization", items: ["Node.js", "TypeScript"] },
+    {
+      label: "Core interests",
+      items: ["Backend Systems", "Cloud", "Distributed Systems"],
+    },
+  ]}
+>
+
+I'm a Backend Engineer specializing in Node.js and TypeScript. I work on the parts of an application its users never see: the APIs, the data behind them, and the services, queues, and caches that connect them.
+
+At Digicorp Information Systems, I worked on production-oriented backend systems built with Node.js and Express.js: building APIs, working with relational and NoSQL databases, contributing to service-oriented and microservice-based systems, and working with Azure-based deployment and CI/CD. The details are on the [Experience](/experience) page.
+
+The areas I care about most are backend systems, cloud, and distributed systems, and understanding what happens underneath the frameworks I use.
+
+</AboutHeader>
+
+<AboutSection id="engineering-focus" title="Engineering Focus">
+
+The problems that interest me sit below the interface: how a service is structured, how its data stays correct, and how it behaves when something goes wrong.
+
+- **Behavior beyond the framework.** Understanding the runtime, database, and network underneath an abstraction, not only its API.
+- **Designing backend services.** APIs and service boundaries that stay understandable as a system grows.
+- **Data and persistence.** How data is modelled, stored, and kept consistent across relational and NoSQL databases.
+- **Asynchronous processing.** Moving work out of the request path with queues, background jobs, and caching, and handling the retries and failures that come with it.
+- **Distributed systems and reliability.** How services communicate, fail, and recover, and designing for the failure cases as well as the normal path.
+- **Cloud infrastructure and delivery.** How code is built, deployed, and run: CI/CD pipelines, containers, and cloud platforms.
+
+</AboutSection>
+
+<AboutSection id="engineering-approach" title="How I Think About Engineering">
+
+> Show the engineering, don't advertise it.
+
+I would rather show how something works than describe it with adjectives. That principle shapes this portfolio: the work and writing here focus on the engineering itself, which means:
+
+- **Architecture.** How the parts of a system fit together, and why they are separated where they are.
+- **Trade-offs.** What a decision costs, and what it was chosen over.
+- **Implementation details.** The specifics that make a design work in practice.
+- **Reliability.** How a system behaves when a dependency fails, not only when everything works.
+- **Data integrity.** Keeping data correct as it moves between people, services, and storage.
+- **Real constraints.** Time, scope, and infrastructure limits, stated rather than hidden.
+
+</AboutSection>
+
+<AboutSection id="currently-exploring" title="Currently Exploring">
+
+What I'm studying and building with at the moment:
+
+- Backend architecture and system design
+- Distributed systems
+- Node.js internals
+- Cloud infrastructure
+- AI-assisted document processing
+- Reliable data workflows
+
+The last two are at the center of [BillSync](/work/billsync), the platform I'm currently building, and some of what I learn ends up in [Engineering](/engineering).
+
+</AboutSection>

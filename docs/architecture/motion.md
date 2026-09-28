@@ -134,6 +134,19 @@ its entries are on screen at first paint. An article's header and body are
 static; paragraphs, headings, and code blocks never animate. The closing
 `ArticleNav` is one `Reveal`, since it always sits below the fold.
 
+### Experience and About pages
+
+The Experience page header, role column, summary, and responsibilities are
+static: the first role is on screen at first paint. The technology groups
+are one `Reveal` (`ExperienceRole` with `revealTechnologies`), and the
+closing `ExperienceNav` is one `Reveal`. On Home, where the whole entry is
+already a `StaggerItem`, the technology groups are not revealed again.
+
+The About header, including the portrait when set, is static because it is
+above the fold. Each `AboutSection` heading is a `Reveal`, like a case-study
+section; its paragraphs and lists are not animated. The closing `AboutNav`
+is one `Reveal`.
+
 ## Micro-interactions
 
 Implemented in the existing primitives with CSS only:

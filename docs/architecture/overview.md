@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Status: Engineering content system complete (Milestone 5). This document describes
+Status: Experience, About, and résumé integration complete (Milestone 6). This document describes
 the intended shape of the system and what exists today. It is updated as parts
 are implemented.
 
@@ -22,8 +22,8 @@ for the problem being solved.
 
 | Layer         | Responsibility                                             | Status                         |
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
-| App Router    | Routing, layouts, metadata. Server Components by default.  | `/`, `/work`, `/engineering`   |
-| Content       | Engineering writing and project case studies as local MDX. | Projects, engineering articles |
+| App Router    | Routing, layouts, metadata. Server Components by default.  | All routes except `/contact`   |
+| Content       | Engineering writing, case studies, and About prose as MDX. | Projects, articles, About      |
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
@@ -50,16 +50,19 @@ What exists today:
 ```
 app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
                      work/page.tsx (Work index), work/[slug]/page.tsx (case study),
-                     engineering/page.tsx (index), engineering/[slug]/page.tsx (article)
+                     engineering/page.tsx (index), engineering/[slug]/page.tsx (article),
+                     experience/page.tsx, about/page.tsx
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
-components/experience/  ExperienceSection
+components/experience/  ExperienceSection, ExperienceRole, ExperienceNav
+components/about/    AboutHeader, AboutSection, AboutNav
 components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
 components/engineering/  ArticleList, ArticleEntry, ArticleHeader, ArticleNav
 components/contact/  ConnectSection
 content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
 content/engineering/ <slug>/article.ts (metadata) and index.mdx (article body)
+content/about/       index.mdx (About page body)
 lib/content/         projects.ts, engineering.ts (types and registries)
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
@@ -93,9 +96,9 @@ Full conventions: [`project-structure.md`](project-structure.md).
 
 ## Route philosophy
 
-`/`, `/work`, `/work/[slug]`, `/engineering`, and `/engineering/[slug]`
-exist; `/work/billsync` is the first case study. The remaining intended
-routes are `/experience`, `/about`, and `/contact`. Routes are
+`/`, `/work`, `/work/[slug]`, `/engineering`, `/engineering/[slug]`,
+`/experience`, and `/about` exist; `/work/billsync` is the first case
+study. The remaining intended route is `/contact`. Routes are
 created together with the content or feature they serve, never as
 placeholders. Content routes are statically generated, with the `[slug]`
 matching the content directory name; unknown slugs return 404.
@@ -124,7 +127,10 @@ active item), `MobileNav` (menu open state), and `ThemeSwitcher` (theme
 preference).
 Identity, navigation items, social links, the résumé path, and the portrait
 live in `lib/site/config.ts`; components never hard-code them. A social link,
-the résumé link, or the Home hero portrait renders only when it is set.
+the résumé links, or the portrait (Home hero and About) renders only when it
+is set. No résumé PDF exists yet, so `resumeHref` is `null` and no résumé
+link is rendered anywhere; see "Static assets" in
+[`project-structure.md`](project-structure.md).
 
 ### Theme
 
@@ -150,7 +156,10 @@ and every Work page reads from it. Adding a project needs no change to the
 Work pages. Engineering articles follow the same split (`article.ts` beside
 `index.mdx`, registered in `lib/content/engineering.ts`), plus a
 `published`/`draft` status: drafts are validated but never listed, routed,
-or prerendered. Details: "Content" in
+or prerendered. The About page body is a single MDX file,
+`content/about/index.mdx`; it has no metadata module or registry. The
+Experience page has no content file of its own: it renders the same
+`lib/site/experience.ts` entries as the Home page. Details: "Content" in
 [`project-structure.md`](project-structure.md).
 
 ## Server-first approach

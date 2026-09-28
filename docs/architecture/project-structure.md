@@ -45,6 +45,11 @@ Exists:
   Only published articles are prerendered (`generateStaticParams`), and
   `dynamicParams = false` makes every other slug, drafts included, return 404. The page also calls `notFound()` when the registry has no published
   article for the slug.
+- `/experience` (`app/experience/page.tsx`), the detailed professional
+  record. It renders every entry in `lib/site/experience.ts`, the same data
+  as the Home Experience section, and closes with `ExperienceNav`.
+- `/about` (`app/about/page.tsx`), the About page. It renders
+  `content/about/index.mdx` and closes with `AboutNav`.
 
 Intended route map (routes not listed above are added when their content
 exists):
@@ -102,6 +107,7 @@ first component is written.
 | `components/experience/`  | Experience-specific components   |
 | `components/work/`        | Project / case-study components  |
 | `components/engineering/` | Engineering article components   |
+| `components/about/`       | About page components            |
 | `components/contact/`     | Contact-specific components      |
 
 `components/ui/` exists and holds the core primitives: `Button`, `Link`,
@@ -130,6 +136,32 @@ professional timeline. It renders the typed entries in `lib/site/experience.ts`
 (most recent first) and reveals them with the motion primitives, since it sits
 below the fold. Entries are structured data, not MDX. A role's `period` is set
 only from verified dates and is not rendered while unset.
+
+`lib/site/experience.ts` is the only source of experience data. Both the
+Home section and the `/experience` page render each entry with
+`ExperienceRole`: role, company, location, and period (when set) in the first
+column; summary, responsibilities, and technology groups in the other two.
+Its `headingLevel` makes the role an h3 on Home (under the section h2) and an
+h2 on `/experience` (under the page h1); sub-headings sit one level below.
+Technology groups are listed by label with no ratings or levels.
+`ExperienceNav` closes the Experience page: the résumé download (only while
+`siteConfig.resumeHref` is set), About, and Let's connect. To change the
+experience shown on either page, edit `lib/site/experience.ts`.
+
+`components/about/` holds the About page layout; its prose lives in
+`content/about/index.mdx`.
+
+| Component      | Role                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `AboutHeader`  | Eyebrow, h1, and the introduction (children); the side column holds the portrait and profile |
+| `AboutSection` | One section on the three-column grid; h2 in the first column, MDX content in the other two   |
+| `AboutNav`     | Closing navigation: View experience, Explore my work, Let's connect                          |
+
+The portrait in `AboutHeader` comes from `siteConfig.portrait`, the same
+value as the Home hero, and renders only while it is set; there is no
+placeholder frame. The profile (role, specialization, core interests) is
+passed from the MDX as a prop, so the column is complete without a photo and
+a portrait is added above it with no layout change.
 
 `components/work/` holds `CurrentWorkSection`, the Home page "Currently
 Working On" section. It renders the typed items in `lib/site/currentWork.ts`;
@@ -335,6 +367,21 @@ describes a project, it states what is implemented, what is designed, and
 what is planned separately, and makes no claim the project's own case study
 does not support.
 
+### About
+
+`content/about/index.mdx` holds all About copy: the introduction and
+profile inside `<AboutHeader>`, then one `<AboutSection id title>` per
+section (Engineering Focus, How I Think About Engineering, Currently
+Exploring). The page owns the h1, so the MDX uses no `#` or `##` headings;
+each section's h2 comes from `AboutSection`. The route's title and
+description are in `app/about/page.tsx`.
+
+Everything on the page is stated from verified information: the approved
+positioning and the role in `lib/site/experience.ts`. "Currently Exploring"
+lists areas of study, not claims of expertise. There is no personal or
+"outside the code" section; add one only with real details provided by the
+owner.
+
 ### MDX conventions
 
 `mdx-components.tsx` styles Markdown elements for all MDX; it adds no outer
@@ -373,22 +420,42 @@ real article and case-study content.
 Images that belong to a single article or case study live with that content
 in `content/`, not in `public/`.
 
-No résumé exists yet. To publish it, add the PDF to `public/resume/` and set
-`resumeHref` in `lib/site/config.ts`; the header, mobile menu, and footer
-links appear only once it is set.
+### Résumé
 
-No portrait exists yet. To show one in the Home hero, add the photo to
-`public/images/` and set `portrait` (path, alt text, and intrinsic size) in
-`lib/site/config.ts`.
+No résumé PDF exists yet, so `siteConfig.resumeHref` is `null`. While it is
+`null`, no résumé link is rendered anywhere: `ResumeLink` (header, mobile
+menu, footer) returns nothing and the Experience page omits its download
+button. Nothing points at a missing file.
+
+To publish or replace it:
+
+1. Add the real PDF as `public/resume/kshitij-pal-resume.pdf`. It is served
+   from `/resume/kshitij-pal-resume.pdf`; no filesystem path is exposed.
+2. Set `resumeHref: "/resume/kshitij-pal-resume.pdf"` in
+   `lib/site/config.ts`.
+3. Update the "has no résumé configured" assertion in
+   `tests/components/navigation/ResumeLink.test.tsx`, then run the checks.
+
+No component changes are needed. Every link reads the same `resumeHref`: the
+"Resume" navigation links open the PDF in the same tab, and the Experience
+page's "Download resume (PDF)" link has the `download` attribute. To update
+the résumé later, replace the file under the same name.
+
+### Portrait
+
+No portrait exists yet. To show one, add the photo to `public/images/` and
+set `portrait` (path, alt text, and intrinsic size) in `lib/site/config.ts`.
+It then appears in the Home hero (in place of the technical visual) and in
+the About header's side column.
 
 ## Tests
 
-| Directory           | Tests for                   | Status                          |
-| ------------------- | --------------------------- | ------------------------------- |
-| `tests/app/`        | Routes in `app/`            | Exists (`/`, Work, Engineering) |
-| `tests/components/` | Components in `components/` | Exists                          |
-| `tests/lib/`        | Modules in `lib/`           | Exists                          |
-| `tests/helpers/`    | Test-only utilities         | Exists                          |
+| Directory           | Tests for                   | Status               |
+| ------------------- | --------------------------- | -------------------- |
+| `tests/app/`        | Routes in `app/`            | Exists (every route) |
+| `tests/components/` | Components in `components/` | Exists               |
+| `tests/lib/`        | Modules in `lib/`           | Exists               |
+| `tests/helpers/`    | Test-only utilities         | Exists               |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at

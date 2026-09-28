@@ -53,6 +53,21 @@ describe("SiteHeader", () => {
     );
   });
 
+  it("marks Experience as the current page only on /experience", () => {
+    vi.mocked(usePathname).mockReturnValue("/experience");
+    render(<SiteHeader />);
+
+    const nav = getPrimaryNav();
+    expect(
+      within(nav).getByRole("link", { name: "Experience" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .filter((link) => link.hasAttribute("aria-current")),
+    ).toHaveLength(1);
+  });
+
   it("activates the parent item on nested routes", () => {
     vi.mocked(usePathname).mockReturnValue("/work/billsync");
     render(<SiteHeader />);
