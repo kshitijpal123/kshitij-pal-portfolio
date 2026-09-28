@@ -126,7 +126,7 @@ Implemented in the existing primitives with CSS only:
 | `Button`                      | Color, background, and border transition; a 1px press (`translate`) that eases |
 | `Link`                        | Color and underline-color transition                                           |
 | `NavLink`                     | Inherits `Link`; the active border color transitions in the mobile menu        |
-| `ThemeSwitcher`               | The selected segment's background and text color transition                    |
+| `ThemeSwitcher`               | The selected segment's background, border, and text color transition           |
 | `Badge`, `Divider`, `Surface` | None                                                                           |
 
 Rules for future interactive elements:

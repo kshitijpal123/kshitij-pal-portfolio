@@ -12,7 +12,7 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-border text-body-sm">
       <Container>
-        <div className="flex flex-col gap-8 py-12 md:flex-row md:justify-between">
+        <div className="flex flex-col gap-8 py-12 md:flex-row md:items-baseline md:justify-between">
           <div>
             <p className="font-semibold">{siteConfig.name}</p>
             <p className="mt-1 font-mono text-meta text-muted-foreground uppercase">
@@ -54,7 +54,7 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-border py-6 text-caption text-muted-foreground sm:flex-row sm:justify-between">
+        <div className="flex flex-col gap-2 border-t border-border py-6 text-caption text-muted-foreground sm:flex-row sm:items-baseline sm:justify-between">
           <p>
             © {new Date().getFullYear()} {siteConfig.name}
           </p>

@@ -1,8 +1,8 @@
 # Design Tokens
 
-Status: Milestone 2.3 (core UI primitives). Tokens are defined in
-`app/globals.css` and consumed by the primitives in `components/ui/`. Nothing
-here is a component or page design.
+Status: Milestone 2 (design system) complete. Tokens are defined in
+`app/globals.css` and consumed by the primitives in `components/ui/`, the
+global shell, and the motion primitives. Nothing here is a page design.
 
 ## Principle
 
@@ -47,7 +47,10 @@ Semantic roles, never raw hues:
 
 Contrast targets used when choosing values: text and accent at least 4.5:1
 on every background and surface; `border-strong` and `ring` at least 3:1.
-`border` is decorative. Meaning is never conveyed by color alone. This is a
+`border` is decorative. Meaning is never conveyed by color alone. A selected
+or active state is marked with `border-strong` or `accent` (the theme
+switcher's selected segment, the active navigation indicator), never by a
+`muted` fill alone, which sits near 1.1:1 against the page. This is a
 design constraint, not a compliance claim; accessibility is validated in a
 later milestone.
 

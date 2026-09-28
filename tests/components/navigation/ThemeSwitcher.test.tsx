@@ -27,6 +27,15 @@ describe("ThemeSwitcher", () => {
     expect(document.documentElement).not.toHaveAttribute("data-theme");
   });
 
+  it("outlines the selected option with a perceivable border", () => {
+    render(<ThemeSwitcher />);
+
+    const label = screen
+      .getByRole("radio", { name: "System" })
+      .closest("label");
+    expect(label).toHaveClass("has-checked:border-border-strong");
+  });
+
   it("reflects a stored preference", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "dark");
     render(<ThemeSwitcher />);
