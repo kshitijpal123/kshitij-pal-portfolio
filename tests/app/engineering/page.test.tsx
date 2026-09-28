@@ -63,7 +63,7 @@ describe("EngineeringPage", () => {
   });
 
   it("defines a page title and description", () => {
-    expect(metadata.title).toBe("Kshitij Pal · Engineering");
+    expect(metadata.title).toBe("Engineering");
     expect(metadata.description).toEqual(expect.any(String));
   });
 });

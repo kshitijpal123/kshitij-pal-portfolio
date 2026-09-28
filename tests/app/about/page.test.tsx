@@ -151,9 +151,9 @@ describe("AboutPage", () => {
   });
 
   it("defines the page title and description", () => {
-    expect(metadata.title).toBe("About · Kshitij Pal");
+    expect(metadata.title).toBe("About");
     expect(metadata.description).toBe(
-      "About Kshitij Pal, a Backend Engineer focused on backend systems, cloud, distributed systems, and production-oriented engineering.",
+      "About Kshitij Pal, a Backend Engineer specializing in Node.js and TypeScript: his engineering focus, how he approaches engineering, and what he is currently exploring.",
     );
   });
 });

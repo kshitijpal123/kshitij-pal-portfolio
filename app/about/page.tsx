@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { AboutNav } from "@/components/about/AboutNav";
 import AboutContent from "@/content/about/index.mdx";
-import { siteConfig } from "@/lib/site/config";
+import { pageMetadata } from "@/lib/seo/metadata";
 
-export const metadata: Metadata = {
-  title: `About · ${siteConfig.name}`,
+export const metadata: Metadata = pageMetadata({
+  title: "About",
   description:
-    "About Kshitij Pal, a Backend Engineer focused on backend systems, cloud, distributed systems, and production-oriented engineering.",
-};
+    "About Kshitij Pal, a Backend Engineer specializing in Node.js and TypeScript: his engineering focus, how he approaches engineering, and what he is currently exploring.",
+  path: "/about",
+});
 
 export default function AboutPage() {
   return (

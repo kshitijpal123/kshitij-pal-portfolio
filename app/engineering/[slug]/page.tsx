@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArticleHeader } from "@/components/engineering/ArticleHeader";
 import { ArticleNav } from "@/components/engineering/ArticleNav";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
 import {
@@ -9,7 +10,8 @@ import {
   getAdjacentArticles,
   getArticle,
 } from "@/lib/content/engineering";
-import { siteConfig } from "@/lib/site/config";
+import { articleMetadata } from "@/lib/seo/metadata";
+import { articleStructuredData } from "@/lib/seo/structuredData";
 
 export const dynamicParams = false;
 
@@ -21,15 +23,7 @@ export async function generateMetadata({
   params,
 }: PageProps<"/engineering/[slug]">): Promise<Metadata> {
   const article = getArticle((await params).slug);
-
-  if (!article) {
-    return {};
-  }
-
-  return {
-    title: `${article.title} · ${siteConfig.name}`,
-    description: article.description,
-  };
+  return article ? articleMetadata(article) : {};
 }
 
 export default async function ArticlePage({
@@ -46,6 +40,7 @@ export default async function ArticlePage({
 
   return (
     <article aria-labelledby="article-heading">
+      <JsonLd data={articleStructuredData(article)} />
       <ArticleHeader article={article} />
       <Section className="border-t border-border">
         <Container>

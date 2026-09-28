@@ -56,7 +56,34 @@ describe("HomePage", () => {
   });
 
   it("defines a page title and description", () => {
-    expect(metadata.title).toBe("Kshitij Pal · Backend Engineer");
-    expect(metadata.description).toEqual(expect.any(String));
+    expect(metadata.title).toEqual({
+      absolute: "Kshitij Pal · Backend Engineer",
+    });
+    expect(metadata.description).toMatch(
+      /^Backend Engineer building production-oriented systems with Node\.js and TypeScript/,
+    );
+  });
+
+  it("describes the person in JSON-LD, with no URL until the domain is set", () => {
+    const { container } = render(<HomePage />);
+
+    const scripts = container.querySelectorAll(
+      'script[type="application/ld+json"]',
+    );
+    expect(scripts).toHaveLength(1);
+    expect(JSON.parse(scripts[0].textContent ?? "")).toEqual({
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Person",
+          name: "Kshitij Pal",
+          jobTitle: "Backend Engineer",
+          sameAs: [
+            "https://github.com/kshitijpal123",
+            "https://www.linkedin.com/in/kshitij-pal-963247195",
+          ],
+        },
+      ],
+    });
   });
 });

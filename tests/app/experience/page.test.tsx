@@ -246,9 +246,9 @@ describe("ExperiencePage", () => {
   });
 
   it("defines the page title and description", () => {
-    expect(metadata.title).toBe("Experience · Kshitij Pal");
+    expect(metadata.title).toBe("Experience");
     expect(metadata.description).toBe(
-      "A detailed overview of Kshitij Pal's backend engineering experience, responsibilities, and technical work.",
+      "Kshitij Pal's professional backend engineering experience: roles, responsibilities, technical work, and progression from full-stack to backend engineering.",
     );
   });
 });

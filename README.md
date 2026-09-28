@@ -68,6 +68,12 @@ delivery needs them: copy `.env.example` to `.env.local` (git-ignored) and set
 the form responds with a generic error and sends nothing. Details: "Contact
 form" in [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
+`SITE_URL`, the canonical origin (for example `https://domain.tld`), is read
+at build time. While it is unset, canonical URLs, sitemap entries, and other
+absolute URLs are omitted. Set it in the production build once the domain
+exists; see
+[`docs/architecture/seo-accessibility-performance.md`](docs/architecture/seo-accessibility-performance.md).
+
 ## Project structure
 
 ```

@@ -85,7 +85,7 @@ describe("ContactPage", () => {
   });
 
   it("defines the page title and description", () => {
-    expect(metadata.title).toBe("Contact · Kshitij Pal");
+    expect(metadata.title).toBe("Contact");
     expect(metadata.description).toBe(
       "Get in touch with Kshitij Pal for backend engineering opportunities, technical conversations, and thoughtful collaboration.",
     );

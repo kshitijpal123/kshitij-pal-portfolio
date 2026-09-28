@@ -1,7 +1,8 @@
 # Architecture Overview
 
-Status: Experience journey evolved (Milestone 6.5) after the contact page
-and form delivery (Milestone 7). This document
+Status: SEO, accessibility, and performance hardening (Milestone 8), after
+the contact page and form delivery (Milestone 7) and the evolved Experience
+journey (Milestone 6.5). This document
 describes the intended shape of the system and what exists today. It is
 updated as parts are implemented.
 
@@ -34,9 +35,12 @@ Resend (see "Contact form" below).
 
 Contact form delivery (Resend) is implemented. Planned integrations, not
 implemented yet: error monitoring (Sentry) and analytics (Google Analytics).
-Full SEO, accessibility, and performance work are later milestones.
-Environment variables are introduced only when a feature requires them; the
-only ones are the three contact form settings in `.env.example`.
+Metadata, canonical URLs, the sitemap, robots, structured data, and the
+accessibility and performance conventions are described in
+[`seo-accessibility-performance.md`](seo-accessibility-performance.md).
+Environment variables are introduced only when a feature requires them: the
+three contact form settings and `SITE_URL`, the canonical origin, all in
+`.env.example`.
 
 ## Principles
 
@@ -56,6 +60,7 @@ app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
                      work/page.tsx (Work index), work/[slug]/page.tsx (case study),
                      engineering/page.tsx (index), engineering/[slug]/page.tsx (article),
                      experience/page.tsx, about/page.tsx, contact/page.tsx,
+                     not-found.tsx, sitemap.ts, robots.ts,
                      api/contact/route.ts (contact form endpoint)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
@@ -67,12 +72,15 @@ components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
 components/engineering/  ArticleList, ArticleEntry, ArticleHeader, ArticleNav
 components/contact/  ConnectSection, ContactForm, ContactField, ContactLinks
+components/seo/      JsonLd (structured-data script)
 content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
 content/engineering/ <slug>/article.ts (metadata) and index.mdx (article body)
 content/about/       index.mdx (About page body)
 lib/content/         projects.ts, engineering.ts (types and registries)
 lib/contact/         validation.ts (shared), email.ts, rateLimit.ts,
                      sendContactEmail.ts (server only)
+lib/seo/             siteUrl.ts, metadata.ts, structuredData.ts, sitemap.ts,
+                     robots.ts
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
@@ -107,7 +115,8 @@ Full conventions: [`project-structure.md`](project-structure.md).
 
 `/`, `/work`, `/work/[slug]`, `/engineering`, `/engineering/[slug]`,
 `/experience`, `/about`, and `/contact` exist; `/work/billsync` is the first
-case study. `/api/contact` is the only Route Handler. Routes are
+case study. `/api/contact` is the only Route Handler; `/sitemap.xml` and
+`/robots.txt` are prerendered metadata routes. Routes are
 created together with the content or feature they serve, never as
 placeholders. Content routes are statically generated, with the `[slug]`
 matching the content directory name; unknown slugs return 404.

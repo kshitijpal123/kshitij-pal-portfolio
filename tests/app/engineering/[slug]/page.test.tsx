@@ -134,8 +134,28 @@ describe("ArticlePage routing", () => {
 
   it("titles the page from the article metadata", async () => {
     const metadata = await generateMetadata(props(slug));
-    expect(metadata.title).toBe(`${title} · Kshitij Pal`);
+    expect(metadata.title).toBe(title);
     expect(metadata.description).toMatch(/^Separating the original document/);
+    expect(metadata.openGraph).toMatchObject({
+      type: "article",
+      publishedTime: "2026-09-28",
+    });
     expect(await generateMetadata(props("unknown"))).toEqual({});
+  });
+
+  it("describes the article in JSON-LD from its typed metadata", async () => {
+    await renderArticle();
+
+    const scripts = document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    );
+    expect(scripts).toHaveLength(1);
+    expect(JSON.parse(scripts[0].textContent ?? "")).toMatchObject({
+      "@type": "Article",
+      headline: title,
+      datePublished: "2026-09-28",
+      author: { "@type": "Person", name: "Kshitij Pal" },
+    });
+    expect(scripts[0].textContent).not.toMatch(/dateModified/);
   });
 });

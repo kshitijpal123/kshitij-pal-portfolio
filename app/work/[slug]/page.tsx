@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { CaseStudyNav } from "@/components/work/CaseStudyNav";
 import { ProjectHeader } from "@/components/work/ProjectHeader";
 import { getProject, projects } from "@/lib/content/projects";
+import { projectMetadata } from "@/lib/seo/metadata";
 
 export const dynamicParams = false;
 
@@ -15,14 +16,7 @@ export async function generateMetadata({
 }: PageProps<"/work/[slug]">): Promise<Metadata> {
   const project = getProject((await params).slug);
 
-  if (!project) {
-    return {};
-  }
-
-  return {
-    title: project.metaTitle,
-    description: project.summary,
-  };
+  return project ? projectMetadata(project) : {};
 }
 
 export default async function ProjectPage({

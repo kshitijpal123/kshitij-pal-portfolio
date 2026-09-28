@@ -3,13 +3,14 @@ import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
 import { ProjectEntry } from "@/components/work/ProjectEntry";
 import { projects } from "@/lib/content/projects";
-import { siteConfig } from "@/lib/site/config";
+import { pageMetadata } from "@/lib/seo/metadata";
 
-export const metadata: Metadata = {
-  title: `${siteConfig.name} · Work`,
+export const metadata: Metadata = pageMetadata({
+  title: "Work",
   description:
-    "Selected engineering work and systems by Kshitij Pal, Backend Engineer, including the BillSync case study.",
-};
+    "Engineering projects and case studies by Kshitij Pal, Backend Engineer, including the BillSync case study.",
+  path: "/work",
+});
 
 export default function WorkPage() {
   return (

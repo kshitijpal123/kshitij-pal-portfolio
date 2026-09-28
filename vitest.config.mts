@@ -40,5 +40,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/setup.ts"],
+    // Tests that need a site URL stub it; the host environment never leaks in.
+    env: { SITE_URL: "" },
   },
 });

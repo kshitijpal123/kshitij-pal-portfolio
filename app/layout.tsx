@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { MAIN_CONTENT_ID, SkipLink } from "@/components/navigation/SkipLink";
+import { rootMetadata } from "@/lib/seo/metadata";
 import { themeInitScript } from "@/lib/theme/preference";
 import "./globals.css";
 
@@ -30,11 +31,7 @@ const mono = IBM_Plex_Mono({
   preload: false,
 });
 
-export const metadata: Metadata = {
-  title: "Backend Engineer",
-  description:
-    "I specialize in Node.js and TypeScript, building backend systems and APIs with a focus on architecture, reliability, and real-world engineering constraints.",
-};
+export const metadata: Metadata = rootMetadata();
 
 export default function RootLayout({
   children,

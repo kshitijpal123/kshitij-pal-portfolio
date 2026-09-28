@@ -3,13 +3,14 @@ import { ContactForm } from "@/components/contact/ContactForm";
 import { ContactLinks } from "@/components/contact/ContactLinks";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
-import { siteConfig } from "@/lib/site/config";
+import { pageMetadata } from "@/lib/seo/metadata";
 
-export const metadata: Metadata = {
-  title: `Contact · ${siteConfig.name}`,
+export const metadata: Metadata = pageMetadata({
+  title: "Contact",
   description:
     "Get in touch with Kshitij Pal for backend engineering opportunities, technical conversations, and thoughtful collaboration.",
-};
+  path: "/contact",
+});
 
 export default function ContactPage() {
   return (

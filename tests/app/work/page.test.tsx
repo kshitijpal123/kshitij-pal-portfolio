@@ -62,7 +62,7 @@ describe("WorkPage", () => {
   });
 
   it("defines a page title and description", () => {
-    expect(metadata.title).toBe("Kshitij Pal · Work");
+    expect(metadata.title).toBe("Work");
     expect(metadata.description).toEqual(expect.any(String));
   });
 });

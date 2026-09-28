@@ -3,13 +3,14 @@ import { ArticleList } from "@/components/engineering/ArticleList";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
 import { articles } from "@/lib/content/engineering";
-import { siteConfig } from "@/lib/site/config";
+import { pageMetadata } from "@/lib/seo/metadata";
 
-export const metadata: Metadata = {
-  title: `${siteConfig.name} · Engineering`,
+export const metadata: Metadata = pageMetadata({
+  title: "Engineering",
   description:
-    "Technical notes, engineering lessons, and systems explored or built by Kshitij Pal, Backend Engineer.",
-};
+    "Technical writing by Kshitij Pal, Backend Engineer: articles on engineering topics, systems explored or built, and lessons learned.",
+  path: "/engineering",
+});
 
 export default function EngineeringPage() {
   return (

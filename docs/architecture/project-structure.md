@@ -54,6 +54,9 @@ Exists:
   `ContactForm`, and `ContactLinks`. It is prerendered.
 - `/api/contact` (`app/api/contact/route.ts`), the contact form's Route
   Handler (`POST` only). See "Contact form" in [`overview.md`](overview.md).
+- `/sitemap.xml` (`app/sitemap.ts`) and `/robots.txt` (`app/robots.ts`),
+  prerendered metadata routes, and `app/not-found.tsx`, the 404 page. See
+  [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 
 Intended route map (routes not listed above are added when their content
 exists):
@@ -113,6 +116,7 @@ first component is written.
 | `components/engineering/` | Engineering article components   |
 | `components/about/`       | About page components            |
 | `components/contact/`     | Contact-specific components      |
+| `components/seo/`         | Structured-data rendering        |
 
 `components/ui/` exists and holds the core primitives: `Button`, `Link`,
 `Container`, `Section`, `Surface`, `Badge`, and `Divider`. They style
@@ -276,6 +280,9 @@ failure it focuses the first invalid field.
 
 Both sections sit below the fold and reveal with the motion primitives.
 
+`components/seo/` holds `JsonLd`, which renders the structured data built by
+`lib/seo/structuredData.ts` on Home and article pages.
+
 `components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
 internal `MotionScope`. They are thin Client Components that accept Server
 Component children; see [`motion.md`](motion.md).
@@ -297,7 +304,7 @@ written.
 | ---------------- | ----------------------------------------------------------------- |
 | `lib/content/`   | MDX/content loading and content utilities                         |
 | `lib/contact/`   | Contact form validation, email rendering, rate limit, delivery    |
-| `lib/seo/`       | SEO metadata and structured-data helpers                          |
+| `lib/seo/`       | Site URL, metadata, structured data, sitemap, and robots          |
 | `lib/analytics/` | Analytics integration helpers                                     |
 | `lib/site/`      | Site configuration and structured data (experience, current work) |
 | `lib/theme/`     | Theme preference storage and initialization                       |
@@ -482,6 +489,11 @@ real article and case-study content.
 
 Images that belong to a single article or case study live with that content
 in `content/`, not in `public/`.
+
+No favicon, icon, or Open Graph image exists yet, so none is referenced.
+Add them through the Next.js file conventions (`app/icon.*`,
+`app/opengraph-image.*`); see
+[`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 
 ### Résumé
 

@@ -3,14 +3,15 @@ import { ExperienceNav } from "@/components/experience/ExperienceNav";
 import { ExperienceRole } from "@/components/experience/ExperienceRole";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
-import { siteConfig } from "@/lib/site/config";
+import { pageMetadata } from "@/lib/seo/metadata";
 import { experienceNewestFirst } from "@/lib/site/experience";
 
-export const metadata: Metadata = {
-  title: `Experience · ${siteConfig.name}`,
+export const metadata: Metadata = pageMetadata({
+  title: "Experience",
   description:
-    "A detailed overview of Kshitij Pal's backend engineering experience, responsibilities, and technical work.",
-};
+    "Kshitij Pal's professional backend engineering experience: roles, responsibilities, technical work, and progression from full-stack to backend engineering.",
+  path: "/experience",
+});
 
 export default function ExperiencePage() {
   return (
