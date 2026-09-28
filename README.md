@@ -78,6 +78,8 @@ mdx-components.tsx   Global MDX component mapping (required by @next/mdx)
 ```
 
 Directories marked _planned_ are created when they first hold real files.
+Structure, naming, and import conventions are documented in
+[`docs/architecture/project-structure.md`](docs/architecture/project-structure.md).
 
 ## Engineering principles
 
