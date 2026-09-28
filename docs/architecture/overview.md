@@ -25,7 +25,7 @@ for the problem being solved.
 | App Router    | Routing, layouts, metadata. Server Components by default.  | Root layout and route in place |
 | Content       | Engineering writing and project case studies as local MDX. | MDX compilation configured     |
 | UI components | Reusable presentational components, grouped by domain.     | Conventions defined; none yet  |
-| Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Neutral token foundation only  |
+| Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
 
 Planned integrations, none implemented yet: error monitoring (Sentry),
@@ -116,6 +116,11 @@ imports are limited to same-directory siblings. No other aliases.
 Lowercase route directories, kebab-case content directories and slugs,
 PascalCase component files, camelCase utility files, and lowercase
 configuration files where the tool expects it.
+
+## Styling
+
+Tailwind CSS v4 with semantic design tokens in `app/globals.css`, supporting
+light and dark themes. See [`design-tokens.md`](design-tokens.md).
 
 ## Decisions
 
