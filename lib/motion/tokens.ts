@@ -30,3 +30,14 @@ export const stagger = {
   interval: 0.05,
   maxSteps: 8,
 } as const;
+
+/**
+ * Level 3 technical motion. Diagram parts appear in flow order, `stepInterval`
+ * apart. A flow takes one `hop` per connection, then rests before repeating.
+ */
+export const technical = {
+  offsetY: 4,
+  stepInterval: 0.08,
+  hop: duration.slow,
+  restBetweenFlows: 5,
+} as const;

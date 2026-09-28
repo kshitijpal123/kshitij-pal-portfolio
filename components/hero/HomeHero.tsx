@@ -1,5 +1,6 @@
 import Image from "next/image";
 import NextLink from "next/link";
+import { TechnicalHeroVisual } from "@/components/hero/TechnicalHeroVisual";
 import { buttonClassName } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { Section } from "@/components/ui/Section";
@@ -94,7 +95,7 @@ export function HomeHero() {
           </div>
         </div>
 
-        {portrait && (
+        {portrait ? (
           <div className="lg:col-span-2 lg:justify-self-end">
             <Image
               src={portrait.src}
@@ -106,6 +107,8 @@ export function HomeHero() {
               className="w-48 rounded-container border border-border lg:w-64"
             />
           </div>
+        ) : (
+          <TechnicalHeroVisual className="w-full max-w-88 lg:col-span-2 lg:justify-self-end" />
         )}
       </Container>
     </Section>

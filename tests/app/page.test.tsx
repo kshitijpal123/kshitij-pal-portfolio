@@ -41,6 +41,20 @@ describe("HomePage", () => {
     ]);
   });
 
+  it("renders the technical visual inside the hero without adding focus stops", () => {
+    render(<HomePage />);
+
+    const hero = screen.getByRole("region", {
+      name: "Backend Engineer building production-oriented systems.",
+    });
+    const visual = hero.querySelector("[aria-hidden='true'] svg[viewBox]");
+    expect(visual).toBeInTheDocument();
+    expect(visual?.querySelectorAll("a, button, [tabindex]")).toHaveLength(0);
+    expect(
+      Array.from(hero.querySelectorAll("a"), (link) => link.textContent),
+    ).toEqual(["Explore my work", "Let's connect"]);
+  });
+
   it("defines a page title and description", () => {
     expect(metadata.title).toBe("Kshitij Pal · Backend Engineer");
     expect(metadata.description).toEqual(expect.any(String));

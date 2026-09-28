@@ -103,8 +103,12 @@ a link button styling without making it a button. Class names are joined with
 `ThemeSwitcher`, `ResumeLink`, and `SkipLink`. They are composed once in
 `app/layout.tsx`; see "Global shell" in [`overview.md`](overview.md).
 
-`components/hero/` holds `HomeHero`, the Home page hero. It uses no motion
-primitives: it is above the fold and must render fully without JavaScript.
+`components/hero/` holds `HomeHero`, the Home page hero, and
+`TechnicalHeroVisual`, the abstract system diagram in its right column.
+`HomeHero` stays a Server Component and uses no motion primitives: it is
+above the fold and its copy must render fully without JavaScript. Only
+`TechnicalHeroVisual` is a Client Component; it is decorative and animates
+itself (see "Home hero visual" in [`motion.md`](motion.md)).
 
 `components/experience/` holds `ExperienceSection`, the Home page
 professional timeline. It renders the typed entries in `lib/site/experience.ts`

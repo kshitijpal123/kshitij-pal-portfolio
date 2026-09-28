@@ -50,7 +50,7 @@ What exists today:
 ```
 app/                 layout.tsx (global shell), page.tsx (Home), globals.css
 components/ui/       Core UI primitives (Button, Link, Container, ...)
-components/hero/     HomeHero
+components/hero/     HomeHero, TechnicalHeroVisual
 components/experience/  ExperienceSection
 components/work/     CurrentWorkSection
 components/contact/  ConnectSection

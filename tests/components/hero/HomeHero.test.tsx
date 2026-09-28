@@ -1,9 +1,14 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HomeHero } from "@/components/hero/HomeHero";
 import { siteConfig } from "@/lib/site/config";
+import { installIntersectionObserver } from "@/tests/helpers/intersectionObserver";
 
 const configuredPortrait = siteConfig.portrait;
+
+beforeAll(() => {
+  installIntersectionObserver();
+});
 
 afterEach(() => {
   siteConfig.portrait = configuredPortrait;
@@ -109,6 +114,16 @@ describe("HomeHero", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("shows the decorative technical visual while no portrait is configured", () => {
+    siteConfig.portrait = null;
+    const { container } = render(<HomeHero />);
+
+    const svg = container.querySelector("svg[viewBox]");
+    expect(svg).toBeInTheDocument();
+    expect(svg?.closest("[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
   it("renders the configured portrait with its alt text", () => {
     siteConfig.portrait = {
       src: "/images/portrait.jpg",
@@ -116,10 +131,11 @@ describe("HomeHero", () => {
       width: 600,
       height: 750,
     };
-    render(<HomeHero />);
+    const { container } = render(<HomeHero />);
 
     expect(
       screen.getByRole("img", { name: "Portrait of the engineer" }),
     ).toBeInTheDocument();
+    expect(container.querySelector("svg[viewBox]")).not.toBeInTheDocument();
   });
 });

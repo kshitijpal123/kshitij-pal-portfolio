@@ -185,8 +185,8 @@ builds.
 
 ## Technical motion (Level 3)
 
-Conventions for the diagrams built in later milestones (the Home page
-technical visual is the first). Nothing here is implemented yet.
+Conventions for technical diagrams. The Home hero visual (below) is the
+first implementation.
 
 - **Semantic state drives the animation.** Model the system (`idle`,
   `receiving`, `processing`, `persisted`, `failed`) and animate between
@@ -208,12 +208,54 @@ technical visual is the first). Nothing here is implemented yet.
   meaning; motion only adds the sense of flow. The reduced-motion state is a
   complete, labelled diagram.
 
+Shared pieces: `technical` in `lib/motion/tokens.ts` (4px node offset, 80 ms
+between flow steps, one `slow` step per hop, 5 s rest between flows) and
+`diagramNodeVariants` / `diagramEdgeVariants` in `lib/motion/variants.ts`,
+which take the part's flow step as `custom`.
+
+### Home hero visual
+
+`components/hero/TechnicalHeroVisual.tsx` is a small SVG diagram in the
+hero's right column: REQUEST → API → PROCESS → QUEUE, with the queue feeding
+a DATABASE and a secondary SERVICE (connection labels HTTP, ASYNC, DATA). It
+supports the heading by showing how the engineer thinks about systems.
+
+- **Abstract on purpose.** It is a generic request/queue/storage flow, not
+  the architecture of any real employer, client, or project, so it carries no
+  product names, infrastructure, technology logos, addresses, or metrics.
+- **Rendering.** Inline SVG with a `viewBox`, colored only with semantic
+  token utilities (`stroke-border-strong`, `stroke-accent`, `fill-background`,
+  `fill-foreground`, `fill-muted-foreground`), so it follows Light, Dark, and
+  System with no overrides. It is capped at `max-w-88` and keeps its aspect
+  ratio, so its size is fixed before any animation starts.
+- **Entrance.** Inside a `MotionScope`, parts appear once in flow order when
+  the diagram enters the viewport: nodes fade and rise 4px, connections only
+  fade. Every animated part carries `data-motion-reveal` for the no-script
+  fallback. The hero itself is not wrapped in `Reveal`; only the visual
+  animates.
+- **Flow.** After the entrance, one accent token follows the request path and
+  a second follows the queue → service branch, one hop per `slow` step, then
+  both rest for 5 s. Tokens are painted beneath the nodes, so they are only
+  visible on connections and rest hidden inside a node. The loop renders only
+  while the diagram is on screen (`useInView`).
+- **Reduced motion.** `useReducedMotionConfig()` (the `MotionScope` policy)
+  removes the flow tokens entirely; the central `reducedMotion="user"`
+  already skips the 4px rise, so parts only fade in and the static diagram is
+  complete.
+- **Accessibility.** The wrapper is `aria-hidden="true"` and the SVG is
+  `focusable="false"`: the hero heading and copy carry the meaning, and the
+  visual adds no tab stops, roles, or interaction.
+- If `siteConfig.portrait` is set, the portrait takes the right column
+  instead of the visual.
+
 ## Performance
 
 - Animate `transform` and `opacity` only. Never layout properties, and
   never `box-shadow` or `filter`.
 - Motion code loads only on pages that render a primitive, and only the
   `domAnimation` feature set.
-- Viewport-triggered, once. Nothing animates while off screen, and no
-  continuous animation exists today.
+- Viewport-triggered, once. Nothing animates while off screen. The only
+  continuous animation is the hero visual's flow: two SVG circles moving by
+  `transform`, resting 5 s per cycle, stopped off screen and under reduced
+  motion.
 - Transforms do not affect layout, so reveals cause no layout shift.

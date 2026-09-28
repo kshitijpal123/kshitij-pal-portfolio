@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { reveal, stagger } from "@/lib/motion/tokens";
+import { reveal, stagger, technical } from "@/lib/motion/tokens";
 import {
+  diagramEdgeVariants,
+  diagramNodeVariants,
   revealVariants,
   revealViewport,
   staggerVariants,
@@ -38,6 +40,37 @@ describe("staggerVariants", () => {
   it("keeps the interval within 30–70ms", () => {
     expect(stagger.interval).toBeGreaterThanOrEqual(0.03);
     expect(stagger.interval).toBeLessThanOrEqual(0.07);
+  });
+});
+
+describe("diagram variants", () => {
+  function visibleAt(variants: typeof diagramNodeVariants, step: number) {
+    const visible = variants.visible;
+    if (typeof visible !== "function") throw new Error("expected a resolver");
+    return visible(step, {}, {});
+  }
+
+  it("moves nodes only a few pixels and edges not at all", () => {
+    expect(diagramNodeVariants.hidden).toEqual({
+      opacity: 0,
+      y: technical.offsetY,
+    });
+    expect(technical.offsetY).toBeLessThanOrEqual(8);
+    expect(diagramEdgeVariants.hidden).toEqual({ opacity: 0 });
+    expect(visibleAt(diagramEdgeVariants, 0)).not.toHaveProperty("y");
+  });
+
+  it("delays each part by its flow step and ends at rest", () => {
+    expect(visibleAt(diagramNodeVariants, 3)).toMatchObject({
+      opacity: 1,
+      y: 0,
+      transition: { delay: 3 * technical.stepInterval },
+    });
+  });
+
+  it("keeps each flow hop within the technical motion range", () => {
+    expect(technical.hop).toBeGreaterThanOrEqual(0.3);
+    expect(technical.hop).toBeLessThanOrEqual(0.45);
   });
 });
 
