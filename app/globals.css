@@ -26,6 +26,7 @@
   --accent-hover: light-dark(#183f9e, #97b8f2);
   --accent-foreground: light-dark(#ffffff, #0b0f15);
   --ring: light-dark(#1f4fc2, #7ba3ec);
+  --danger: light-dark(#b42318, #f97066);
   --shadow-color: light-dark(rgb(15 20 25 / 0.08), rgb(0 0 0 / 0.5));
 }
 
@@ -69,6 +70,7 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-ring: var(--ring);
+  --color-danger: var(--danger);
 
   --shadow-*: initial;
   --shadow-subtle: 0 1px 2px 0 var(--shadow-color);

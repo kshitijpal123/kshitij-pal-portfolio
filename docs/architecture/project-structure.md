@@ -50,6 +50,10 @@ Exists:
   as the Home Experience section, and closes with `ExperienceNav`.
 - `/about` (`app/about/page.tsx`), the About page. It renders
   `content/about/index.mdx` and closes with `AboutNav`.
+- `/contact` (`app/contact/page.tsx`), the Contact page: introduction,
+  `ContactForm`, and `ContactLinks`. It is prerendered.
+- `/api/contact` (`app/api/contact/route.ts`), the contact form's Route
+  Handler (`POST` only). See "Contact form" in [`overview.md`](overview.md).
 
 Intended route map (routes not listed above are added when their content
 exists):
@@ -211,8 +215,23 @@ Dates render as `<time dateTime="YYYY-MM-DD">` with text from
 with `Intl`, so output never depends on locale or time zone.
 
 `components/contact/` holds `ConnectSection`, the Home page call to action
-that points to `/contact`. It is not the Contact page. Its LinkedIn link
-comes from `siteConfig.social` and renders only while that URL is set.
+that points to `/contact`, and the Contact page components. `ConnectSection`'s
+LinkedIn link comes from `siteConfig.social` and renders only while that URL
+is set.
+
+| Component      | Role                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `ContactForm`  | Client Component: fields, honeypot, submit state, and the status and alert live regions        |
+| `ContactField` | One labelled input or textarea; its error is linked with `aria-describedby` and `aria-invalid` |
+| `ContactLinks` | "Elsewhere": every set `siteConfig.social` link and the résumé once `resumeHref` is set        |
+
+The Contact page is a two-column grid from `lg` on the Home three-column
+axis: the introduction and `ContactLinks` in the first column, the form
+across the other two. Below `lg` it is one column in reading order:
+introduction, form, links. `ContactForm` keeps values after a failure,
+clears them after a successful send, and keeps focus on the submit button
+while sending (`aria-disabled`, not `disabled`); on a client-side validation
+failure it focuses the first invalid field.
 
 Both sections sit below the fold and reveal with the motion primitives.
 
@@ -236,6 +255,7 @@ written.
 | Directory        | Responsibility                                                    |
 | ---------------- | ----------------------------------------------------------------- |
 | `lib/content/`   | MDX/content loading and content utilities                         |
+| `lib/contact/`   | Contact form validation, email rendering, rate limit, delivery    |
 | `lib/seo/`       | SEO metadata and structured-data helpers                          |
 | `lib/analytics/` | Analytics integration helpers                                     |
 | `lib/site/`      | Site configuration and structured data (experience, current work) |
@@ -424,8 +444,9 @@ in `content/`, not in `public/`.
 
 No résumé PDF exists yet, so `siteConfig.resumeHref` is `null`. While it is
 `null`, no résumé link is rendered anywhere: `ResumeLink` (header, mobile
-menu, footer) returns nothing and the Experience page omits its download
-button. Nothing points at a missing file.
+menu, footer) returns nothing, the Experience page omits its download
+button, and the Contact page's `ContactLinks` omits its résumé link. Nothing
+points at a missing file.
 
 To publish or replace it:
 

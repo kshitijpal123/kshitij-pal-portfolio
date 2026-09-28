@@ -44,10 +44,12 @@ Semantic roles, never raw hues:
 | `accent-hover`      | Hover/active state of `accent`                         |
 | `accent-foreground` | Text on an `accent` background                         |
 | `ring`              | Focus indicator                                        |
+| `danger`            | Form validation errors: invalid border and error text  |
 
 Contrast targets used when choosing values: text and accent at least 4.5:1
 on every background and surface; `border-strong` and `ring` at least 3:1.
-`border` is decorative. Meaning is never conveyed by color alone. A selected
+`danger` is text-grade (at least 4.5:1) and always accompanies an error
+message. `border` is decorative. Meaning is never conveyed by color alone. A selected
 or active state is marked with `border-strong` or `accent` (the theme
 switcher's selected segment, the active navigation indicator), never by a
 `muted` fill alone, which sits near 1.1:1 against the page. This is a

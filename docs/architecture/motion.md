@@ -147,6 +147,14 @@ above the fold. Each `AboutSection` heading is a `Reveal`, like a case-study
 section; its paragraphs and lists are not animated. The closing `AboutNav`
 is one `Reveal`.
 
+### Contact page
+
+The Contact page uses no motion. On desktop the introduction, form, and links
+are all on screen at first paint, so a reveal would only delay them; on
+mobile, only the links sit below the fold, and one isolated reveal is not
+worth loading Motion. Validation messages, the sending state, and the result
+messages appear instantly.
+
 ## Micro-interactions
 
 Implemented in the existing primitives with CSS only:

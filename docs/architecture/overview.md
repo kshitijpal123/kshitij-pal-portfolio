@@ -1,8 +1,8 @@
 # Architecture Overview
 
-Status: Experience, About, and résumé integration complete (Milestone 6). This document describes
-the intended shape of the system and what exists today. It is updated as parts
-are implemented.
+Status: Contact page and form delivery complete (Milestone 7). This document
+describes the intended shape of the system and what exists today. It is
+updated as parts are implemented.
 
 ## System shape
 
@@ -16,23 +16,26 @@ Next.js
 
 The portfolio is a single Next.js application. There is no separate backend,
 API server, database, CMS, or authentication layer; none of these are required
-for the problem being solved.
+for the problem being solved. The one server-side endpoint is the contact
+form's Route Handler, `POST /api/contact`, which relays messages through
+Resend (see "Contact form" below).
 
 ## Layers
 
 | Layer         | Responsibility                                             | Status                         |
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
-| App Router    | Routing, layouts, metadata. Server Components by default.  | All routes except `/contact`   |
+| App Router    | Routing, layouts, metadata. Server Components by default.  | All routes                     |
 | Content       | Engineering writing, case studies, and About prose as MDX. | Projects, articles, About      |
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
 
-Planned integrations, none implemented yet: error monitoring (Sentry),
-analytics (Google Analytics), and contact form delivery (Resend). Full SEO,
-accessibility, and performance work are later milestones. Environment
-variables are introduced only when a feature requires them; none exist today.
+Contact form delivery (Resend) is implemented. Planned integrations, not
+implemented yet: error monitoring (Sentry) and analytics (Google Analytics).
+Full SEO, accessibility, and performance work are later milestones.
+Environment variables are introduced only when a feature requires them; the
+only ones are the three contact form settings in `.env.example`.
 
 ## Principles
 
@@ -51,7 +54,8 @@ What exists today:
 app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
                      work/page.tsx (Work index), work/[slug]/page.tsx (case study),
                      engineering/page.tsx (index), engineering/[slug]/page.tsx (article),
-                     experience/page.tsx, about/page.tsx
+                     experience/page.tsx, about/page.tsx, contact/page.tsx,
+                     api/contact/route.ts (contact form endpoint)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
 components/experience/  ExperienceSection, ExperienceRole, ExperienceNav
@@ -59,11 +63,13 @@ components/about/    AboutHeader, AboutSection, AboutNav
 components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
 components/engineering/  ArticleList, ArticleEntry, ArticleHeader, ArticleNav
-components/contact/  ConnectSection
+components/contact/  ConnectSection, ContactForm, ContactField, ContactLinks
 content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
 content/engineering/ <slug>/article.ts (metadata) and index.mdx (article body)
 content/about/       index.mdx (About page body)
 lib/content/         projects.ts, engineering.ts (types and registries)
+lib/contact/         validation.ts (shared), email.ts, rateLimit.ts,
+                     sendContactEmail.ts (server only)
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
@@ -97,8 +103,8 @@ Full conventions: [`project-structure.md`](project-structure.md).
 ## Route philosophy
 
 `/`, `/work`, `/work/[slug]`, `/engineering`, `/engineering/[slug]`,
-`/experience`, and `/about` exist; `/work/billsync` is the first case
-study. The remaining intended route is `/contact`. Routes are
+`/experience`, `/about`, and `/contact` exist; `/work/billsync` is the first
+case study. `/api/contact` is the only Route Handler. Routes are
 created together with the content or feature they serve, never as
 placeholders. Content routes are statically generated, with the `[slug]`
 matching the content directory name; unknown slugs return 404.
@@ -161,6 +167,77 @@ or prerendered. The About page body is a single MDX file,
 Experience page has no content file of its own: it renders the same
 `lib/site/experience.ts` entries as the Home page. Details: "Content" in
 [`project-structure.md`](project-structure.md).
+
+## Contact form
+
+```
+ContactForm (client) → POST /api/contact (Route Handler, Node.js)
+  → JSON parse → honeypot → validation → rate limit → config check
+    → Resend → CONTACT_TO_EMAIL inbox
+```
+
+`/contact` is prerendered; only `ContactForm` is a Client Component. It
+validates with the same `validateContact` (`lib/contact/validation.ts`) that
+the route runs, so messages match, but the route is authoritative. The
+validator trims values, collapses line breaks in name, email, and subject,
+drops unknown keys, and enforces: name 1–100, email valid and ≤ 254, subject
+1–200, message 10–5,000 characters.
+
+**Route responses** are always JSON `{ success, error?, fieldErrors? }`:
+
+| Status | When                                                                       |
+| ------ | -------------------------------------------------------------------------- |
+| 200    | Sent, or the honeypot was filled (nothing is sent)                         |
+| 400    | Malformed JSON or invalid fields (`fieldErrors` per field)                 |
+| 405    | GET, PUT, PATCH, DELETE (`Allow: POST`)                                    |
+| 413    | Body over 20,000 characters                                                |
+| 415    | Content-Type is not `application/json`                                     |
+| 429    | Rate limit exceeded (`Retry-After: 900`)                                   |
+| 500    | Missing configuration, a Resend error, or an unexpected exception; generic |
+
+Error bodies never contain provider messages, stack traces, or secrets. Logs
+record only a fixed message and, for Resend failures, the error code; never
+submitted content, email addresses, or IPs.
+
+**Resend.** `lib/contact/sendContactEmail.ts` is the only module that imports
+the `resend` SDK, and only the route imports it. Environment variables
+(server only, no `NEXT_PUBLIC_` prefix, documented in `.env.example`):
+
+| Variable             | Purpose                                               |
+| -------------------- | ----------------------------------------------------- |
+| `RESEND_API_KEY`     | Resend API key with sending access                    |
+| `CONTACT_TO_EMAIL`   | Recipient inbox; never taken from the request         |
+| `CONTACT_FROM_EMAIL` | Sender on a Resend-verified domain, e.g. `Name <a@b>` |
+
+The visitor's address is never the sender: `from` is `CONTACT_FROM_EMAIL`,
+`to` is `CONTACT_TO_EMAIL`, and `replyTo` is the visitor, so replying in the
+inbox answers them. The subject is `[Portfolio Contact] {subject}`; the email
+has a plain-text part and an HTML part in which every value is escaped. No
+headers, recipients, or templates come from the client. If any variable is
+missing, the route returns 500 and sends nothing.
+
+**Abuse protection** is deliberately light:
+
+- A visually hidden `website` field (`aria-hidden`, `tabindex=-1`). If it has
+  a value, the route answers 200 as if sent, before validation, so a bot
+  learns nothing.
+- `createRateLimiter` (`lib/contact/rateLimit.ts`): 3 valid submissions per
+  15 minutes per client IP, sliding window. The IP is the first
+  `x-forwarded-for` address (else `x-real-ip`), used only as a limiter key.
+  This is a **process-local baseline**: state is per instance, lost on
+  restart, and not shared across instances or serverless invocations, and the
+  header can be spoofed unless the hosting proxy overwrites it. It is not a
+  distributed production control; replace it with a shared store or an edge
+  rule (for example AWS WAF rate-based rules) if abuse becomes real.
+
+**Local testing.** Unit tests mock the `resend` module; no test makes a
+network call. To try real delivery, copy `.env.example` to `.env.local`
+(git-ignored), set a real key, a verified sender, and your own inbox, then run
+`npm run dev`. Without these, submissions return the generic error.
+
+**Production.** Set the three variables in the hosting environment's secret
+configuration, not in the repository. The sender's domain must be verified in
+Resend.
 
 ## Server-first approach
 

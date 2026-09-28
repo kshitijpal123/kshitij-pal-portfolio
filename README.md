@@ -25,9 +25,10 @@ studies and engineering writing.
 | CI         | GitHub Actions                          |
 | Deployment | AWS (planned)                           |
 
-There is no database, CMS, authentication, or separate backend service.
-Monitoring (Sentry), analytics (Google Analytics), and the contact form
-(Resend) are planned and not yet implemented.
+There is no database, CMS, authentication, or separate backend service. The
+contact form posts to a Next.js Route Handler that sends email through
+Resend. Monitoring (Sentry) and analytics (Google Analytics) are planned and
+not yet implemented.
 
 ## Architecture
 
@@ -61,8 +62,11 @@ npm run dev          # start the dev server at http://localhost:3000
 | `npm run format`       | Format files with Prettier                  |
 | `npm run format:check` | Verify formatting (used in CI)              |
 
-No environment variables are required. They will be introduced only when a
-feature requires them; local values go in `.env.local`, which is git-ignored.
+The site builds and runs with no environment variables. Only contact form
+delivery needs them: copy `.env.example` to `.env.local` (git-ignored) and set
+`RESEND_API_KEY`, `CONTACT_TO_EMAIL`, and `CONTACT_FROM_EMAIL`. Without them
+the form responds with a generic error and sends nothing. Details: "Contact
+form" in [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
 ## Project structure
 
