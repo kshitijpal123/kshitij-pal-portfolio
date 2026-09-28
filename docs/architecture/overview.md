@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Status: Work index and BillSync case study complete (Milestone 4). This document describes
+Status: Engineering content system complete (Milestone 5). This document describes
 the intended shape of the system and what exists today. It is updated as parts
 are implemented.
 
@@ -22,8 +22,8 @@ for the problem being solved.
 
 | Layer         | Responsibility                                             | Status                         |
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
-| App Router    | Routing, layouts, metadata. Server Components by default.  | `/`, `/work`, `/work/[slug]`   |
-| Content       | Engineering writing and project case studies as local MDX. | Projects (BillSync)            |
+| App Router    | Routing, layouts, metadata. Server Components by default.  | `/`, `/work`, `/engineering`   |
+| Content       | Engineering writing and project case studies as local MDX. | Projects, engineering articles |
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
@@ -49,15 +49,18 @@ What exists today:
 
 ```
 app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
-                     work/page.tsx (Work index), work/[slug]/page.tsx (case study)
+                     work/page.tsx (Work index), work/[slug]/page.tsx (case study),
+                     engineering/page.tsx (index), engineering/[slug]/page.tsx (article)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
 components/experience/  ExperienceSection
 components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
+components/engineering/  ArticleList, ArticleEntry, ArticleHeader, ArticleNav
 components/contact/  ConnectSection
 content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
-lib/content/         projects.ts (project types and registry)
+content/engineering/ <slug>/article.ts (metadata) and index.mdx (article body)
+lib/content/         projects.ts, engineering.ts (types and registries)
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
@@ -71,9 +74,8 @@ tests/               setup.ts, helpers/, app/, components/, lib/
 docs/                architecture/, adr/
 ```
 
-Everything else (other `components/` and `lib/` directories,
-`content/engineering/`, `public/`) is defined by convention and created when it first holds a real
-file. Project code lives outside `app/`; `app/` contains routing files
+Everything else (other `components/` and `lib/` directories, `public/`) is
+defined by convention and created when it first holds a real file. Project code lives outside `app/`; `app/` contains routing files
 only.
 
 | Path                 | Purpose                                                         |
@@ -91,9 +93,9 @@ Full conventions: [`project-structure.md`](project-structure.md).
 
 ## Route philosophy
 
-`/`, `/work`, and `/work/[slug]` exist; `/work/billsync` is the first case
-study. The remaining intended routes are `/engineering`,
-`/engineering/[slug]`, `/experience`, `/about`, and `/contact`. Routes are
+`/`, `/work`, `/work/[slug]`, `/engineering`, and `/engineering/[slug]`
+exist; `/work/billsync` is the first case study. The remaining intended
+routes are `/experience`, `/about`, and `/contact`. Routes are
 created together with the content or feature they serve, never as
 placeholders. Content routes are statically generated, with the `[slug]`
 matching the content directory name; unknown slugs return 404.
@@ -145,8 +147,11 @@ A project directory holds `project.ts`, its typed metadata, and `index.mdx`,
 its case-study body. Metadata lives in TypeScript rather than as an MDX export
 so the compiler checks it; `lib/content/projects.ts` registers the projects
 and every Work page reads from it. Adding a project needs no change to the
-Work pages. Details: "Content" in [`project-structure.md`](project-structure.md).
-No engineering articles exist yet.
+Work pages. Engineering articles follow the same split (`article.ts` beside
+`index.mdx`, registered in `lib/content/engineering.ts`), plus a
+`published`/`draft` status: drafts are validated but never listed, routed,
+or prerendered. Details: "Content" in
+[`project-structure.md`](project-structure.md).
 
 ## Server-first approach
 

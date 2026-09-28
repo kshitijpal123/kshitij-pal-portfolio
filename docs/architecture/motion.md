@@ -127,6 +127,13 @@ case study, the header is static, each `ProjectSection` heading is a
 data-model groups, decisions, status groups) is one `Stagger`. Paragraphs are
 not animated. The tenancy diagram is static.
 
+### Engineering pages
+
+The Engineering index uses no motion, for the same reason as the Work index:
+its entries are on screen at first paint. An article's header and body are
+static; paragraphs, headings, and code blocks never animate. The closing
+`ArticleNav` is one `Reveal`, since it always sits below the fold.
+
 ## Micro-interactions
 
 Implemented in the existing primitives with CSS only:

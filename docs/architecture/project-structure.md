@@ -38,6 +38,13 @@ Exists:
   statically generated for each registered project (`generateStaticParams`)
   with `dynamicParams = false`, so unknown slugs return 404. The first and
   currently only case study is `/work/billsync`.
+- `/engineering` (`app/engineering/page.tsx`), the Engineering index. It
+  lists the published articles in `lib/content/engineering.ts`, newest first,
+  or an empty state when there are none. It has no per-article code.
+- `/engineering/[slug]` (`app/engineering/[slug]/page.tsx`), an article.
+  Only published articles are prerendered (`generateStaticParams`), and
+  `dynamicParams = false` makes every other slug, drafts included, return 404. The page also calls `notFound()` when the registry has no published
+  article for the slug.
 
 Intended route map (routes not listed above are added when their content
 exists):
@@ -157,6 +164,20 @@ text; drawn parts (arrows, rails, step numbers, "≠") are `aria-hidden`, so
 the diagrams read the same to assistive technology and without CSS. On narrow
 screens they become vertical flows rather than shrinking.
 
+`components/engineering/` holds the Engineering components. All are Server
+Components; the only client code is the `Reveal` in `ArticleNav`.
+
+| Component       | Role                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| `ArticleList`   | The index list (`<ol>`, newest first), or the empty state when nothing is published      |
+| `ArticleEntry`  | One index entry: date column, then h2 title, description, reading time, "Read article"   |
+| `ArticleHeader` | Article header: eyebrow (and series, if set), h1, description, dates, reading time       |
+| `ArticleNav`    | Closing `nav` "Articles": previous (older) and next (newer) article, Back to Engineering |
+
+Dates render as `<time dateTime="YYYY-MM-DD">` with text from
+`formatArticleDate` ("September 28, 2026"), which is built by hand rather than
+with `Intl`, so output never depends on locale or time zone.
+
 `components/contact/` holds `ConnectSection`, the Home page call to action
 that points to `/contact`. It is not the Contact page. Its LinkedIn link
 comes from `siteConfig.social` and renders only while that URL is set.
@@ -195,9 +216,9 @@ analytics) lives in that domain's directory.
 
 ## Content
 
-Content is local MDX, compiled by `@next/mdx` (see
-[ADR 0001](../adr/0001-local-mdx-content.md)). Projects exist; engineering
-articles do not yet.
+Content is local MDX, compiled by `@next/mdx` at build time (see
+[ADR 0001](../adr/0001-local-mdx-content.md)). No Markdown parser ships to
+the browser.
 
 ### Projects
 
@@ -244,31 +265,102 @@ The Home page "Currently Working On" item (`lib/site/currentWork.ts`) is a
 separate editorial list and still states BillSync's status and description
 itself; keep it in step when those change.
 
-`mdx-components.tsx` styles Markdown elements (`p`, `ul`, `ol`, `h3`,
-`strong`, `code`) for all MDX. Layout components are imported inside each
-MDX file. Vitest compiles MDX with `@mdx-js/mdx` through a small plugin in
-`vitest.config.mts`, using the same `mdx-components.tsx`, so tests render
-real case-study content.
-
 ### Engineering articles
 
-Intended layout:
+The Engineering section is a general technical publication: anything
+technical worth writing down, not tied to one technology. It has no tags,
+categories, or search; articles are ordered by date only.
 
 ```
-content/
-  engineering/
-    <article-slug>/
-      index.mdx
-      <optional assets>
+content/engineering/<slug>/
+  article.ts   Typed metadata (ArticleDefinition); imports ./index.mdx
+  index.mdx    The article body
 ```
 
-- Each piece of content is a kebab-case directory; the directory name is the
-  slug.
-- The entry file is always `index.mdx`. Assets used only by that piece sit
-  beside it.
-- Articles are expected to follow the project convention (typed metadata
-  beside the MDX, a registry in `lib/content/`); the article type is defined
-  when the first article exists.
+As with projects, metadata is TypeScript so `tsc` checks it, and the MDX
+holds only the body. The title, description, and dates are never repeated
+in the MDX.
+
+`ArticleDefinition` fields (`lib/content/engineering.ts`):
+
+| Field         | Notes                                                                        |
+| ------------- | ---------------------------------------------------------------------------- |
+| `slug`        | Kebab-case, equal to the directory name                                      |
+| `title`       | The h1 and the start of the document title (`<title> · Kshitij Pal`)         |
+| `description` | One or two sentences: index entry, header, and page description              |
+| `publishedAt` | `YYYY-MM-DD`, set by hand; filesystem dates are never used                   |
+| `updatedAt`   | Optional `YYYY-MM-DD`, only for a meaningful revision; not before publishing |
+| `readingTime` | Whole minutes, estimated once from the word count (about 200 words a minute) |
+| `status`      | `"published"` or `"draft"`                                                   |
+| `series`      | Optional series name, shown in the header eyebrow                            |
+| `Content`     | The MDX component                                                            |
+
+`href` is derived as `/engineering/<slug>` by the registry.
+
+**Status.** Only `published` articles appear anywhere. A `draft` can be
+committed and registered: it is validated like any article, but the
+registry drops it before anything reads the list, so it is not on the
+index, not prerendered, not found by `getArticle`, and its URL returns 404.
+Nothing public shows the word "draft".
+
+**Registry.** `createArticleRegistry(definitions)` validates every
+definition and throws, failing the build and tests, on a duplicate or
+non-kebab-case slug, an empty title or description, an invalid date, an
+`updatedAt` before `publishedAt`, or a reading time that is not a positive
+whole number. It returns:
+
+- `articles`: published articles, newest first (same-day articles by slug).
+- `getArticle(slug)`: a published article or `undefined`.
+- `getAdjacentArticles(slug)`: `previous` (the next older) and `next` (the
+  next newer) published article, each only when it exists.
+
+The module applies it to its `definitions` list and exports the result. The
+index, the article route, `generateStaticParams`, and metadata all read from
+it; tests build their own registries from fixtures.
+
+To add an article:
+
+1. Create `content/engineering/<slug>/`.
+2. Add `article.ts` exporting an `ArticleDefinition` that imports
+   `./index.mdx`. Start with `status: "draft"` if it is not ready.
+3. Write `index.mdx`, starting at `##` headings (the page owns the h1).
+4. Add it to `definitions` in `lib/content/engineering.ts`.
+5. Run `npm run format:check`, `npm run lint`, `npm run typecheck`,
+   `npm run test`, and `npm run build`.
+6. Commit. Set `status: "published"` in a commit when it should go live.
+7. Deploy.
+
+Only genuine writing is added; no placeholder articles. When an article
+describes a project, it states what is implemented, what is designed, and
+what is planned separately, and makes no claim the project's own case study
+does not support.
+
+### MDX conventions
+
+`mdx-components.tsx` styles Markdown elements for all MDX; it adds no outer
+margins, and the rendering layout spaces blocks (`space-y-6` in articles and
+case-study sections).
+
+| Markdown    | Rendering                                                                                                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `##`, `###` | h2 (serif) and h3, with extra space above; `#` is not used in content                                                                                          |
+| Paragraphs  | `body-lg`, capped at `max-w-measure` (about 65–70 characters)                                                                                                  |
+| Lists       | Disc and decimal lists at the same measure                                                                                                                     |
+| Links       | The `Link` primitive (`inline` variant)                                                                                                                        |
+| `> quote`   | A left rule in `border-strong`, muted text                                                                                                                     |
+| Inline code | Mono on a `muted` chip                                                                                                                                         |
+| Fenced code | `pre` on `surface-muted` with a border, scrolls horizontally inside itself, focusable (`tabIndex={0}`) so keyboard users can scroll it; no syntax highlighting |
+
+Articles render in a `max-w-narrow` column, so code blocks may be wider than
+paragraphs. Markdown tables are not supported: `@next/mdx` compiles
+CommonMark without the GFM plugin, and no article needs one yet. Adding
+`remark-gfm` is the path if one does. Custom MDX components are added only
+when an article needs them; case-study layout components are imported inside
+each MDX file.
+
+Vitest compiles MDX with `@mdx-js/mdx` through a small plugin in
+`vitest.config.mts`, using the same `mdx-components.tsx`, so tests render
+real article and case-study content.
 
 ## Static assets
 
@@ -291,19 +383,21 @@ No portrait exists yet. To show one in the Home hero, add the photo to
 
 ## Tests
 
-| Directory           | Tests for                   | Status                                |
-| ------------------- | --------------------------- | ------------------------------------- |
-| `tests/app/`        | Routes in `app/`            | Exists (`/`, `/work`, `/work/[slug]`) |
-| `tests/components/` | Components in `components/` | Exists                                |
-| `tests/lib/`        | Modules in `lib/`           | Exists                                |
-| `tests/helpers/`    | Test-only utilities         | Exists                                |
+| Directory           | Tests for                   | Status                          |
+| ------------------- | --------------------------- | ------------------------------- |
+| `tests/app/`        | Routes in `app/`            | Exists (`/`, Work, Engineering) |
+| `tests/components/` | Components in `components/` | Exists                          |
+| `tests/lib/`        | Modules in `lib/`           | Exists                          |
+| `tests/helpers/`    | Test-only utilities         | Exists                          |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at
 `tests/components/work/ProjectCard.test.tsx`. Test files use the
 `*.test.ts` / `*.test.tsx` suffix. Shared setup lives in `tests/setup.ts`.
 `tests/helpers/` holds stand-ins for browser APIs that jsdom lacks, such as
-`intersectionObserver.ts`, imported by the tests that need them.
+`intersectionObserver.ts`, and test fixtures such as `articles.ts`, imported
+by the tests that need them. `tests/mdx-components.test.tsx` covers the root
+`mdx-components.tsx`.
 
 ## Imports
 

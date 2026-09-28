@@ -1,0 +1,94 @@
+When a system uses AI to read documents, it is tempting to write the output straight into the database and move on. The model returns structured fields, the fields look right, and the document has become data. The problem is what that shortcut quietly decides: that a machine's reading of a document is the same thing as a fact the business can rely on.
+
+This article works through why those two things should be kept apart, using the data model of [BillSync](/work/billsync), an inventory platform I am building, as the concrete example. Where it describes BillSync, it separates what is implemented from what the architecture is designed to do and what is still planned.
+
+## An extraction is an interpretation
+
+A supplier purchase bill describes stock that has arrived: the supplier, the products, the quantities. An extraction step turns that document into structured fields. Those fields are useful, but they are a proposal about what the document says, not a guarantee.
+
+The difference matters most when the output feeds state that other decisions build on. A misread quantity that goes directly into stock levels is no longer an extraction error. It is an inventory error, and every later sale, reorder, or report inherits it. Correcting it afterwards means first discovering it, then working out which records it touched.
+
+So the question is not whether the extraction is usually right. It is what the system should treat as authoritative, and what it should be able to explain later.
+
+## Three representations, three responsibilities
+
+A useful way to reason about this is to name the representations that are easy to conflate and give each one a single job:
+
+- **The original document** is source evidence. It is kept as it was received, so every later stage can be checked against it.
+- **The extraction** is a machine-generated interpretation. It records what the system proposed.
+- **Verified business data** is what a person has reviewed, corrected where needed, and approved. Only this is treated as true by the rest of the system.
+
+None of them should silently stand in for another. If the extraction overwrites the document's role as evidence, there is nothing to check it against. If verified data overwrites the extraction, there is no record of what the machine got wrong.
+
+## Keep each stage as its own record
+
+The simplest implementation stores one set of fields and updates it in place as a person corrects it:
+
+```sql
+-- One row, rewritten in place: the original reading is gone.
+UPDATE document_fields
+SET quantity = 12
+WHERE document_id = 'doc-1' AND field = 'line_1';
+```
+
+After this runs, the database knows the corrected value but not that a correction happened, what the original reading was, or who changed it. The alternative is to treat each stage as a separate record and let later stages reference earlier ones instead of replacing them. As an illustrative sketch, not BillSync's schema:
+
+```ts
+type ExtractionAttempt = {
+  id: string;
+  documentId: string;
+  startedAt: Date;
+};
+
+type ExtractionSnapshot = {
+  attemptId: string;
+  // The structured data exactly as the extraction produced it.
+  fields: Record<string, string>;
+};
+
+type Correction = {
+  attemptId: string;
+  field: string;
+  extractedValue: string;
+  correctedValue: string;
+  correctedBy: string;
+};
+```
+
+With this shape, "what did the machine say" and "what did a person change" are separate facts that can both be queried. A retried extraction becomes a new attempt rather than a silent replacement of the old one.
+
+## Where the separation lives in BillSync
+
+### What is implemented
+
+BillSync's database foundation is implemented and verified: PostgreSQL accessed through Drizzle ORM, eleven core tables, a migration system, and tests covering the relationships between tables. Three of those tables carry the extraction history:
+
+- `extraction_attempts` tracks each attempt separately from the bill it belongs to.
+- `extraction_snapshots` preserve the structured data an extraction produced, as it was produced.
+- `corrections` represent the changes a person makes during review, kept distinct from the machine output they change.
+
+Verified business data lives in different tables (`products`, `batches`), and changes to stock are recorded in `inventory_movements`. Extraction history and business state are kept apart in the schema itself.
+
+### What the architecture is designed to do
+
+The design places human verification between extraction and business data as an explicit step, so that inventory changes only through verified data. The case study summarizes the principle this way:
+
+> The system separates evidence, machine interpretation, human correction, and business state.
+
+### What is not built yet
+
+The application workflow on top of the database is not complete. Connecting the processing flow end to end, completing the verification workflow, and connecting extraction to verified inventory updates are the planned next steps. The data model describes where each stage lives; the workflow that moves a bill through those stages is still being built.
+
+## What the separation buys
+
+Keeping the stages apart is designed to give a system properties that a single overwritten record cannot:
+
+1. **Traceability.** A business value can be followed back through corrections and extractions to the original document.
+2. **Distinguishability.** What the machine proposed and what a person changed remain separate facts, so the system can explain where a number came from.
+3. **Retained history.** Earlier extraction attempts are not lost when a document is processed again.
+
+The cost is real: more tables, more joins, and a review step that someone has to perform. For data a business makes decisions on, that cost buys the ability to answer "why does the system believe this?" with evidence rather than a guess.
+
+## The general lesson
+
+The pattern is not specific to AI or to inventory. Any time a system derives data from an input it does not control, such as a parsed file, a third-party API response, or a model's output, it is worth asking which representation is authoritative, and whether the derivation should be stored as a fact or as a proposal. AI extraction makes the question sharper because its output looks confident whether it is right or not.
