@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Status: foundation complete (Milestone 1). This document describes
+Status: Home page complete (Milestone 3). This document describes
 the intended shape of the system and what exists today. It is updated as parts
 are implemented.
 

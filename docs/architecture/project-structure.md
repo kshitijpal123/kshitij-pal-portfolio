@@ -118,7 +118,10 @@ only from verified dates and is not rendered while unset.
 
 `components/work/` holds `CurrentWorkSection`, the Home page "Currently
 Working On" section. It renders the typed items in `lib/site/currentWork.ts`;
-an item links to its case study only when `href` is set. Its first link,
+an item links to its case study only when `href` is set. From `lg` it shares
+the Experience section's three-column grid (heading in the first column,
+content in the other two), so both sections align on one editorial axis and
+the project reads as current work rather than a feature block. Its first link,
 `/work/billsync`, points at the intended case-study route and returns 404
 until that route exists, like the other intended routes already linked from
 the site.

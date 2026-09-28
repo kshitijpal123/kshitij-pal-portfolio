@@ -20,14 +20,14 @@ export function CurrentWorkSection({
       aria-labelledby="current-work-heading"
       className="border-t border-border"
     >
-      <Container>
+      <Container className="grid gap-10 lg:grid-cols-3 lg:gap-12">
         <Reveal>
           <h2 id="current-work-heading" className="font-serif">
             Currently Working On
           </h2>
         </Reveal>
 
-        <Stagger as="ul" className="mt-10 grid gap-6 lg:mt-12">
+        <Stagger as="ul" className="grid gap-6 lg:col-span-2">
           {items.map((item, index) => (
             <StaggerItem key={item.name} as="li">
               <CurrentWorkDetails
@@ -52,7 +52,7 @@ function CurrentWorkDetails({ item, headingId }: CurrentWorkDetailsProps) {
     <Surface>
       <article aria-labelledby={headingId}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
-          <h3 id={headingId} className="font-serif text-h2">
+          <h3 id={headingId} className="font-serif">
             {item.name}
           </h3>
           <dl className="sm:text-right">
