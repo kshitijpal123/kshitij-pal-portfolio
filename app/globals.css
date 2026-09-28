@@ -74,18 +74,30 @@
   --shadow-subtle: 0 1px 2px 0 var(--shadow-color);
   --shadow-elevated:
     0 1px 2px 0 var(--shadow-color), 0 4px 12px -2px var(--shadow-color);
+
+  /*
+   * `--font-plex-*` and `--font-source-serif` are set on <html> by next/font
+   * in app/layout.tsx; system stacks remain as fallbacks.
+   */
+  --font-sans:
+    var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --font-serif:
+    var(--font-source-serif), ui-serif, "Iowan Old Style", Charter, Cambria,
+    Georgia, "Times New Roman", serif;
+  --font-mono:
+    var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", monospace;
 }
 
 @theme {
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  --font-serif:
-    ui-serif, "Iowan Old Style", Charter, Cambria, Georgia, "Times New Roman",
-    serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    monospace;
+  /* Mono is loaded at 400 and 500 only. */
+  --font-weight-*: initial;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
 
   /* Headings scale fluidly between mobile and desktop; body sizes are fixed. */
   --text-*: initial;
@@ -123,7 +135,12 @@
   --spacing-section: clamp(4rem, 3rem + 4vw, 6rem);
   --spacing-editorial: clamp(6rem, 4rem + 8vw, 10rem);
 
-  /* Layout widths: `max-w-narrow`, `max-w-content`, `max-w-wide`. */
+  /*
+   * Layout widths: `max-w-narrow`, `max-w-content`, `max-w-wide`.
+   * `max-w-measure` caps running text at ~65–70 characters. It is in em so
+   * it follows the element's text size.
+   */
+  --container-measure: 30em;
   --container-narrow: 40rem;
   --container-content: 72rem;
   --container-wide: 84rem;
@@ -137,6 +154,37 @@
 @layer base {
   html {
     @apply bg-background font-sans text-body text-foreground antialiased;
+    overflow-wrap: break-word;
+  }
+
+  /*
+   * Element defaults only; spacing between blocks belongs to layouts.
+   * h4–h6 stay at body size.
+   */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold;
+    text-wrap: balance;
+  }
+
+  h1 {
+    @apply text-h1;
+  }
+
+  h2 {
+    @apply text-h2;
+  }
+
+  h3 {
+    @apply text-h3;
+  }
+
+  p {
+    text-wrap: pretty;
   }
 
   *,
