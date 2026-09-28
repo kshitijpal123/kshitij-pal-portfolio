@@ -9,9 +9,19 @@ export type SocialLink = {
   href: string | null;
 };
 
+export type Portrait = {
+  /** Path in `public/images/`, for example `/images/portrait.jpg`. */
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+};
+
 type SiteConfig = {
   name: string;
   role: string;
+  /** `null` until a real photo exists; the Home hero renders none while unset. */
+  portrait: Portrait | null;
   /**
    * Path of the résumé PDF in `public/resume/`, for example
    * `/resume/kshitij-pal-resume.pdf`. `null` until the file exists; every
@@ -25,6 +35,7 @@ type SiteConfig = {
 export const siteConfig: SiteConfig = {
   name: "Kshitij Pal",
   role: "Backend Engineer",
+  portrait: null,
   resumeHref: null,
   nav: [
     { label: "Home", href: "/" },

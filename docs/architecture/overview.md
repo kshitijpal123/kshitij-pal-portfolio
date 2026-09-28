@@ -48,8 +48,9 @@ variables are introduced only when a feature requires them; none exist today.
 What exists today:
 
 ```
-app/                 layout.tsx (global shell), page.tsx (placeholder), globals.css
+app/                 layout.tsx (global shell), page.tsx (Home), globals.css
 components/ui/       Core UI primitives (Button, Link, Container, ...)
+components/hero/     HomeHero
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
@@ -111,9 +112,9 @@ Everything in the shell is a Server Component except three small Client
 Components in `components/navigation/`: `NavLink` (reads the pathname for the
 active item), `MobileNav` (menu open state), and `ThemeSwitcher` (theme
 preference).
-Identity, navigation items, social links, and the résumé path live in
-`lib/site/config.ts`; components never hard-code them. A social link or the
-résumé link renders only when its URL is set.
+Identity, navigation items, social links, the résumé path, and the portrait
+live in `lib/site/config.ts`; components never hard-code them. A social link,
+the résumé link, or the Home hero portrait renders only when it is set.
 
 ### Theme
 

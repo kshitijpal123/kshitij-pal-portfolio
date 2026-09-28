@@ -27,7 +27,8 @@ Project code lives outside `app/`. `app/` contains only routing files
 
 ## Routes
 
-Exists: `/` (`app/page.tsx`), a minimal placeholder.
+Exists: `/` (`app/page.tsx`), the Home page. It currently renders the hero
+only.
 
 Intended route map (not implemented; routes are added when their content
 exists):
@@ -100,6 +101,9 @@ a link button styling without making it a button. Class names are joined with
 `components/navigation/` holds `DesktopNav`, `MobileNav`, `NavLink`,
 `ThemeSwitcher`, `ResumeLink`, and `SkipLink`. They are composed once in
 `app/layout.tsx`; see "Global shell" in [`overview.md`](overview.md).
+
+`components/hero/` holds `HomeHero`, the Home page hero. It uses no motion
+primitives: it is above the fold and must render fully without JavaScript.
 
 `components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
 internal `MotionScope`. They are thin Client Components that accept Server
@@ -179,6 +183,10 @@ in `content/`, not in `public/`.
 No résumé exists yet. To publish it, add the PDF to `public/resume/` and set
 `resumeHref` in `lib/site/config.ts`; the header, mobile menu, and footer
 links appear only once it is set.
+
+No portrait exists yet. To show one in the Home hero, add the photo to
+`public/images/` and set `portrait` (path, alt text, and intrinsic size) in
+`lib/site/config.ts`.
 
 ## Tests
 

@@ -1,9 +1,13 @@
-import { Container } from "@/components/ui/Container";
+import type { Metadata } from "next";
+import { HomeHero } from "@/components/hero/HomeHero";
+import { siteConfig } from "@/lib/site/config";
+
+export const metadata: Metadata = {
+  title: `${siteConfig.name} · ${siteConfig.role}`,
+  description:
+    "Backend Engineer building production-oriented systems with Node.js and TypeScript, focused on architecture, reliability, and real-world engineering constraints.",
+};
 
 export default function HomePage() {
-  return (
-    <Container className="py-section">
-      <h1>Under development</h1>
-    </Container>
-  );
+  return <HomeHero />;
 }
