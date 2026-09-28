@@ -20,5 +20,7 @@ Store content as MDX files in the repository under `content/`, compiled by
 - Content changes go through the same Git workflow and CI checks as code.
 - No runtime data store to operate, secure, or pay for.
 - Publishing requires a commit and deployment; there is no in-browser editor.
-- Content metadata (for listings and SEO) must be handled in code. The exact
-  mechanism is deferred until the first content type is implemented.
+- Content metadata (for listings and SEO) must be handled in code. Since the
+  first content type (projects, Milestone 4), metadata is a typed TypeScript
+  module beside each MDX file, collected by a registry in `lib/content/`; see
+  "Content" in `docs/architecture/project-structure.md`.

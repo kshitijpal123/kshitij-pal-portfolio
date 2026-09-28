@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import NextLink from "next/link";
 import { describe, expect, it, vi } from "vitest";
 import { Button, buttonClassName } from "@/components/ui/Button";
 
@@ -85,9 +86,9 @@ describe("Button", () => {
 describe("buttonClassName", () => {
   it("lets a link take button styling without becoming a button", () => {
     render(
-      <a href="/work" className={buttonClassName("secondary")}>
+      <NextLink href="/work" className={buttonClassName("secondary")}>
         View work
-      </a>,
+      </NextLink>,
     );
 
     const link = screen.getByRole("link", { name: "View work" });

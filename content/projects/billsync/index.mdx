@@ -1,0 +1,533 @@
+import { ArchitectureDiagram } from "@/components/work/ArchitectureDiagram";
+import { DataModelOverview } from "@/components/work/DataModelOverview";
+import { DecisionList } from "@/components/work/DecisionList";
+import { FlowComparison } from "@/components/work/FlowComparison";
+import { FlowDiagram } from "@/components/work/FlowDiagram";
+import { ProjectSection } from "@/components/work/ProjectSection";
+import { StageComparison } from "@/components/work/StageComparison";
+import { StatusSummary } from "@/components/work/StatusSummary";
+import { TenancyDiagram } from "@/components/work/TenancyDiagram";
+
+<ProjectSection id="problem" label="01" title="The problem">
+
+A supplier purchase bill describes stock that has arrived: who supplied it, which products it contains, and the line items an inventory system needs. But a bill is a document, not data. Before it can change inventory, the information in it has to be read, structured, and checked.
+
+<FlowDiagram
+  caption="From document to operational data"
+  steps={[
+    { label: "Unstructured document" },
+    { label: "Extracted information" },
+    { label: "Human verification" },
+    { label: "Trusted operational data", highlight: true },
+  ]}
+/>
+
+AI extraction can turn a document into structured fields, but what it produces is an interpretation, not a guarantee. A misread product or quantity that flows straight into stock levels becomes an inventory error, and every later decision builds on it. For data a business relies on, an unverified interpretation is not a sufficient source of truth.
+
+The initial domain context is inventory for independent medical stores in India. The architecture is deliberately built around general document and inventory workflows rather than that one domain, so the same model can extend to other industries.
+
+</ProjectSection>
+
+<ProjectSection id="core-idea" label="02" title="The core idea">
+
+BillSync treats three things that are easy to conflate as separate, each with its own responsibility.
+
+<StageComparison
+  caption="Three distinct representations"
+  stages={[
+    {
+      label: "Original document",
+      role: "Source evidence",
+      description:
+        "The bill as it was received. Every later stage can be checked against it.",
+    },
+    {
+      label: "AI extraction",
+      role: "Machine-generated interpretation",
+      description:
+        "Structured fields proposed by the system. Useful, but not yet trusted.",
+    },
+    {
+      label: "Verified business data",
+      role: "Human-confirmed operational truth",
+      description:
+        "Data a person has reviewed, corrected where needed, and approved.",
+    },
+  ]}
+/>
+
+None of them silently stands in for another. The document stays available as evidence. The extraction records what the system proposed. Only verified data is treated as authoritative and allowed to change inventory. Keeping the stages apart is what makes it possible to answer, later, where a number came from and who confirmed it.
+
+</ProjectSection>
+
+<ProjectSection id="workflow" label="03" title="System workflow">
+
+A bill moves through seven stages, from upload to history.
+
+<FlowDiagram
+  caption="Core workflow"
+  steps={[
+    {
+      label: "Upload",
+      description: "The original supplier document enters the system.",
+    },
+    {
+      label: "Process",
+      description: "Processing can continue asynchronously after upload.",
+    },
+    {
+      label: "Extract",
+      description:
+        "The system converts document information into structured fields.",
+    },
+    {
+      label: "Review",
+      description:
+        "The extracted information is presented for human verification.",
+    },
+    {
+      label: "Verify",
+      description: "The user corrects or approves the extraction.",
+    },
+    {
+      label: "Update",
+      description:
+        "Verified information becomes authoritative business data: products, batches, and inventory.",
+      highlight: true,
+    },
+    {
+      label: "Audit",
+      description:
+        "Important changes and inventory effects are retained as history.",
+    },
+  ]}
+/>
+
+</ProjectSection>
+
+<ProjectSection id="architecture" label="04" title="Architecture">
+
+The diagram shows the development architecture BillSync is being built around. It describes the structure and direction of the system, not a production deployment.
+
+<ArchitectureDiagram
+  caption="System architecture"
+  status="Development architecture"
+  layers={[
+    {
+      nodes: [{ label: "Client", description: "Uploads a supplier document" }],
+    },
+    {
+      nodes: [
+        {
+          label: "API / Upload",
+          description: "Accepts the upload and hands off processing",
+        },
+      ],
+    },
+    {
+      nodes: [
+        {
+          label: "Message broker",
+          technology: "RabbitMQ",
+          description: "Carries processing work to workers",
+        },
+      ],
+    },
+    {
+      nodes: [
+        {
+          label: "Worker",
+          description: "Consumes work and processes the document",
+        },
+      ],
+    },
+    {
+      label: "Processing outputs",
+      nodes: [
+        { label: "Extraction", description: "Structured fields and snapshots" },
+        {
+          label: "Document storage",
+          technology: "Object storage",
+          description: "Document files; MinIO in local development",
+        },
+        { label: "Metadata", description: "Bill records and lifecycle status" },
+      ],
+    },
+    {
+      nodes: [
+        {
+          label: "Human verification",
+          description: "Review, correct, approve",
+        },
+      ],
+    },
+    {
+      nodes: [
+        {
+          label: "Verified business data",
+          description: "Products, batches, inventory",
+          highlight: true,
+        },
+      ],
+    },
+    {
+      nodes: [
+        {
+          label: "Data model",
+          technology: "PostgreSQL · Drizzle ORM",
+          description: "Extraction history and business state, kept apart",
+        },
+      ],
+    },
+  ]}
+  supporting={{
+    label: "Supporting infrastructure",
+    nodes: [
+      {
+        label: "Redis",
+        description: "Part of the current infrastructure direction",
+      },
+    ],
+  }}
+/>
+
+The request path ends when the upload is accepted. Everything after the message broker happens in the background, on workers. Human verification sits between extraction and business data as an explicit step, not an optional one. PostgreSQL holds both the extraction history and the verified business state, in separate tables, so one never overwrites the other.
+
+</ProjectSection>
+
+<ProjectSection id="async-processing" label="05" title="Asynchronous processing">
+
+Reading and extracting a document is potentially longer work than a user-facing request should wait on. BillSync separates the two.
+
+<FlowComparison
+  flows={[
+    {
+      caption: "Synchronous",
+      steps: [
+        { label: "Upload" },
+        { label: "Process document" },
+        { label: "Extract" },
+        { label: "Response" },
+      ],
+      note: "The upload request stays open until all processing has finished.",
+    },
+    {
+      caption: "Asynchronous",
+      steps: [
+        { label: "Upload" },
+        { label: "Accept request" },
+        { label: "Queue work" },
+        { label: "Background processing" },
+        { label: "Extraction" },
+        { label: "Verification", highlight: true },
+      ],
+      note: "The request ends once the work is accepted and queued; processing continues independently.",
+    },
+  ]}
+/>
+
+The upload side acts as a producer: it accepts the document and publishes the processing work to a message broker. A worker consumes that work, processes the document, and persists the extraction result. RabbitMQ is the current message broker.
+
+<FlowDiagram
+  caption="Producer, broker, worker"
+  steps={[
+    {
+      label: "Producer",
+      detail: "API / Upload",
+      description: "Publishes processing work.",
+    },
+    {
+      label: "Message broker",
+      detail: "RabbitMQ",
+      description: "Holds the work until a worker takes it.",
+    },
+    {
+      label: "Worker",
+      detail: "Consumer",
+      description: "Processes the document and persists the result.",
+      highlight: true,
+    },
+  ]}
+/>
+
+Bill processing has lifecycle status handling around it, so the rest of the system can tell where a bill is in the flow without depending on the processing call itself.
+
+</ProjectSection>
+
+<ProjectSection id="ai-processing" label="06" title="AI document processing">
+
+AI output is treated as an intermediate representation: the starting point for review, never an automatic write to business data. This section describes the structure of the pipeline, not a specific model or provider.
+
+<FlowDiagram
+  caption="Extraction pipeline"
+  steps={[
+    { label: "Document" },
+    { label: "Document interpretation" },
+    { label: "Structured extraction", detail: "extraction_attempts" },
+    { label: "Extraction snapshot", detail: "extraction_snapshots" },
+    { label: "Human review" },
+    { label: "Corrections", detail: "corrections" },
+    { label: "Verified data", highlight: true },
+  ]}
+/>
+
+Three tables carry the pipeline's history:
+
+- `extraction_attempts` tracks each extraction attempt separately from the bill it belongs to, so a bill's processing history is retained rather than overwritten.
+- `extraction_snapshots` preserve the structured data an extraction produced, as it was produced.
+- `corrections` represent changes a person makes during review, kept distinct from the machine output they change.
+
+</ProjectSection>
+
+<ProjectSection id="data-model" label="07" title="Data model">
+
+PostgreSQL is the database foundation, accessed through Drizzle ORM. The schema has eleven tables in five groups.
+
+<DataModelOverview
+  groups={[
+    {
+      name: "Business and identity",
+      tables: [
+        {
+          name: "businesses",
+          description: "Tenants: each business on the platform.",
+        },
+        { name: "users", description: "People who use the system." },
+      ],
+    },
+    {
+      name: "Document",
+      tables: [
+        { name: "bills", description: "Uploaded supplier purchase bills." },
+        {
+          name: "bill_items",
+          description: "Line items that belong to a bill.",
+        },
+      ],
+    },
+    {
+      name: "Extraction",
+      tables: [
+        {
+          name: "extraction_attempts",
+          description: "Each attempt to extract a bill.",
+        },
+        {
+          name: "extraction_snapshots",
+          description: "Structured data an extraction produced.",
+        },
+        {
+          name: "corrections",
+          description: "Human changes made during review.",
+        },
+      ],
+    },
+    {
+      name: "Inventory",
+      tables: [
+        { name: "products", description: "Products the business stocks." },
+        { name: "batches", description: "Batches of a product." },
+        {
+          name: "inventory_movements",
+          description: "History of changes to inventory.",
+        },
+      ],
+    },
+    {
+      name: "Audit",
+      tables: [
+        {
+          name: "audit_events",
+          description: "Important events retained as history.",
+        },
+      ],
+    },
+  ]}
+/>
+
+Conceptually, the groups follow the workflow. Businesses and users define who owns and acts on the data. A bill owns its line items and its extraction history, and corrections record what a person changed in that history. Verified data flows into products and batches, and changes to stock are recorded as inventory movements. Audit events cut across the groups.
+
+</ProjectSection>
+
+<ProjectSection id="multi-tenancy" label="08" title="Multi-tenancy">
+
+BillSync is designed as a multi-tenant SaaS. Each business is a separate tenant.
+
+<TenancyDiagram
+  caption="Tenant structure"
+  platform="Platform"
+  platformRole="SUPER_ADMIN"
+  tenants={[
+    { name: "Business A", roles: ["ADMIN", "STAFF"] },
+    { name: "Business B", roles: ["ADMIN", "STAFF"] },
+    { name: "Business C", roles: ["ADMIN", "STAFF"] },
+  ]}
+/>
+
+- **ADMIN** has administrative rights within its own business only, including managing that business's STAFF users.
+- **STAFF** users belong to one business.
+- **Business users** are not given access to any other business.
+- **SUPER_ADMIN** belongs to the platform operator, not to a business. The architecture provides for platform-level, cross-business insights at that layer.
+
+Tenancy is part of the foundation rather than added later: businesses and users are core tables, so tenant boundaries are expressed in the data model from the start.
+
+</ProjectSection>
+
+<ProjectSection id="data-integrity" label="09" title="Data integrity and auditability">
+
+BillSync does not overwrite an extraction with its corrected result. Each stage is kept as its own record.
+
+<FlowDiagram
+  caption="From evidence to business state"
+  steps={[
+    { label: "Original document", description: "The evidence." },
+    {
+      label: "Extraction attempt",
+      detail: "extraction_attempts",
+      description: "An attempt to read the document.",
+    },
+    {
+      label: "Extraction snapshot",
+      detail: "extraction_snapshots",
+      description: "What the machine produced.",
+    },
+    {
+      label: "Human correction",
+      detail: "corrections",
+      description: "What a person changed.",
+    },
+    {
+      label: "Verified business data",
+      detail: "products · batches",
+      description: "What the business now treats as true.",
+      highlight: true,
+    },
+    {
+      label: "Audit event / inventory movement",
+      detail: "audit_events · inventory_movements",
+      description: "What happened, retained as history.",
+    },
+  ]}
+/>
+
+**The system separates evidence, machine interpretation, human correction, and business state.**
+
+Preserving each stage is designed to give the system properties that a single overwritten record cannot:
+
+- **Traceability.** Business data can be followed back through corrections and extractions to the original bill.
+- **Distinguishability.** What the machine proposed and what a person changed remain separate facts.
+- **Retained processing history.** Extraction attempts are tracked separately, so earlier attempts are not lost.
+- **Inventory as history.** Inventory movements record how stock changed, not only where it stands now.
+
+</ProjectSection>
+
+<ProjectSection id="foundation" label="10" title="Development foundation">
+
+The database foundation is implemented and verified in the BillSync project.
+
+### Database foundation
+
+- PostgreSQL with Drizzle ORM
+- Eleven core tables across identity, documents, extraction, inventory, and audit
+- A migration system
+- Relationships between tables defined and covered by tests
+- Automated tests for the database package
+
+### Local development infrastructure
+
+Docker Compose runs the services the architecture depends on:
+
+- PostgreSQL 16
+- RabbitMQ 3.13
+- Redis 7
+- MinIO
+
+This is the local development setup, not a production environment.
+
+</ProjectSection>
+
+<ProjectSection id="decisions" label="11" title="Engineering Decisions">
+
+The design decisions the architecture is built on, and the reasoning behind each.
+
+<DecisionList
+  decisions={[
+    {
+      decision: "AI extraction is not authoritative business data.",
+      why: "Extraction is an interpretation of a document. Treating it as an intermediate result keeps unverified output out of inventory state.",
+    },
+    {
+      decision: "Human verification comes before business state is trusted.",
+      why: "A person confirms or corrects the extraction, so authoritative data always has a human decision behind it.",
+    },
+    {
+      decision: "Processing is asynchronous.",
+      why: "The upload request does not wait on potentially longer document processing, which workers handle independently of the user-facing action.",
+    },
+    {
+      decision: "Extraction history is retained separately.",
+      why: "Attempts, snapshots, and corrections are separate records, so it stays clear what the system produced and what a person changed.",
+    },
+    {
+      decision:
+        "Multi-tenancy is part of the architecture, not an afterthought.",
+      why: "Businesses and users are foundation tables, so tenant boundaries are part of the data model from the start.",
+    },
+    {
+      decision: "Audit and history are modeled explicitly.",
+      why: "Audit events and inventory movements are tables of their own, so important history is part of the data model itself.",
+    },
+    {
+      decision: "Document processing is separated from inventory state.",
+      why: "Document and extraction tables are distinct from products, batches, and movements, and inventory is designed to change only through verified data.",
+    },
+  ]}
+/>
+
+</ProjectSection>
+
+<ProjectSection id="status" label="12" title="Current Status">
+
+BillSync is currently being developed. The database foundation is implemented and verified; the application workflow built on top of it is not complete.
+
+<StatusSummary
+  groups={[
+    {
+      label: "Established",
+      items: [
+        "Database foundation",
+        "Core domain model",
+        "Multi-tenant data model direction",
+        "Document and extraction data model",
+        "Local development infrastructure",
+      ],
+    },
+    {
+      label: "Current direction",
+      items: [
+        "Asynchronous processing through a message broker and workers",
+        "Human verification before data becomes authoritative",
+        "Tenant-scoped business roles and a platform layer",
+        "Redis as part of the infrastructure",
+      ],
+    },
+    {
+      label: "Planned next",
+      items: [
+        "Complete the end-to-end processing flow",
+        "Complete the verification workflow",
+        "Connect extraction to verified inventory updates",
+        "Expand operational workflows",
+        "Continue hardening reliability and deployment",
+      ],
+    },
+  ]}
+/>
+
+</ProjectSection>
+
+<ProjectSection id="next" label="13" title="What's next">
+
+The next phase is to connect the database foundation to the complete document-processing and verification workflow, then harden the system around reliability, auditability, and operational inventory behavior.
+
+</ProjectSection>

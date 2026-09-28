@@ -1,0 +1,48 @@
+import type { ReactNode } from "react";
+import { Reveal } from "@/components/motion/Reveal";
+import { Container } from "@/components/ui/Container";
+import { Section } from "@/components/ui/Section";
+
+type ProjectSectionProps = {
+  /** Anchor id; the heading id is derived from it. */
+  id: string;
+  /** Short mono label above the heading, such as the section number. */
+  label?: string;
+  title: string;
+  children: ReactNode;
+};
+
+/**
+ * One case-study section: heading in the first column, content in the other
+ * two, on the same grid as the Home page sections.
+ */
+export function ProjectSection({
+  id,
+  label,
+  title,
+  children,
+}: ProjectSectionProps) {
+  const headingId = `${id}-heading`;
+
+  return (
+    <Section
+      id={id}
+      aria-labelledby={headingId}
+      className="border-t border-border"
+    >
+      <Container className="grid gap-8 lg:grid-cols-3 lg:gap-12">
+        <Reveal className="lg:sticky lg:top-8 lg:self-start">
+          {label && (
+            <p className="mb-3 font-mono text-meta text-muted-foreground uppercase">
+              {label}
+            </p>
+          )}
+          <h2 id={headingId} className="font-serif">
+            {title}
+          </h2>
+        </Reveal>
+        <div className="min-w-0 space-y-6 lg:col-span-2">{children}</div>
+      </Container>
+    </Section>
+  );
+}

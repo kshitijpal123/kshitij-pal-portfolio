@@ -119,6 +119,14 @@ server-render their starting state, so that content would stay transparent
 until JavaScript hydrates. Page content appears immediately; reveals are for
 content further down.
 
+### Work pages
+
+The Work index uses no motion: its entries are visible on first paint. In a
+case study, the header is static, each `ProjectSection` heading is a
+`Reveal`, and each diagram or grouped list (flow steps, architecture layers,
+data-model groups, decisions, status groups) is one `Stagger`. Paragraphs are
+not animated. The tenancy diagram is static.
+
 ## Micro-interactions
 
 Implemented in the existing primitives with CSS only:

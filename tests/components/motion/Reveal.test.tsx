@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import NextLink from "next/link";
 import { beforeAll, describe, expect, it } from "vitest";
 import { Reveal } from "@/components/motion/Reveal";
 import {
@@ -14,7 +15,7 @@ function renderReveal() {
   render(
     <Reveal className="mt-4">
       <h2>Architecture</h2>
-      <a href="/work">View work</a>
+      <NextLink href="/work">View work</NextLink>
     </Reveal>,
   );
   return screen.getByRole("heading", { name: "Architecture" }).parentElement;

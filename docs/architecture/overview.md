@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Status: Home page complete (Milestone 3). This document describes
+Status: Work index and BillSync case study complete (Milestone 4). This document describes
 the intended shape of the system and what exists today. It is updated as parts
 are implemented.
 
@@ -22,8 +22,8 @@ for the problem being solved.
 
 | Layer         | Responsibility                                             | Status                         |
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
-| App Router    | Routing, layouts, metadata. Server Components by default.  | Root layout and route in place |
-| Content       | Engineering writing and project case studies as local MDX. | MDX compilation configured     |
+| App Router    | Routing, layouts, metadata. Server Components by default.  | `/`, `/work`, `/work/[slug]`   |
+| Content       | Engineering writing and project case studies as local MDX. | Projects (BillSync)            |
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
@@ -48,12 +48,16 @@ variables are introduced only when a feature requires them; none exist today.
 What exists today:
 
 ```
-app/                 layout.tsx (global shell), page.tsx (Home), globals.css
+app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
+                     work/page.tsx (Work index), work/[slug]/page.tsx (case study)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero, TechnicalHeroVisual
 components/experience/  ExperienceSection
-components/work/     CurrentWorkSection
+components/work/     CurrentWorkSection, Work index and case-study components,
+                     diagram components
 components/contact/  ConnectSection
+content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
+lib/content/         projects.ts (project types and registry)
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
@@ -67,8 +71,8 @@ tests/               setup.ts, helpers/, app/, components/, lib/
 docs/                architecture/, adr/
 ```
 
-Everything else (other `components/` and `lib/` directories, `content/`,
-`public/`) is defined by convention and created when it first holds a real
+Everything else (other `components/` and `lib/` directories,
+`content/engineering/`, `public/`) is defined by convention and created when it first holds a real
 file. Project code lives outside `app/`; `app/` contains routing files
 only.
 
@@ -87,12 +91,12 @@ Full conventions: [`project-structure.md`](project-structure.md).
 
 ## Route philosophy
 
-Only `/` exists. The intended routes are `/`, `/work`, `/work/[slug]`,
-`/engineering`, `/engineering/[slug]`, `/experience`, `/about`, and
-`/contact`; the first case study will be `/work/billsync`. Routes are created
-together with the content or feature they serve, never as placeholders.
-Content routes are expected to be statically generated, with the `[slug]`
-matching the content directory name.
+`/`, `/work`, and `/work/[slug]` exist; `/work/billsync` is the first case
+study. The remaining intended routes are `/engineering`,
+`/engineering/[slug]`, `/experience`, `/about`, and `/contact`. Routes are
+created together with the content or feature they serve, never as
+placeholders. Content routes are statically generated, with the `[slug]`
+matching the content directory name; unknown slugs return 404.
 
 ## Component organization
 
@@ -136,11 +140,13 @@ instances and other tabs in sync.
 ## Content organization
 
 Each article or case study is a kebab-case directory under
-`content/engineering/` or `content/projects/` containing `index.mdx` and any
-assets it uses. The directory name is the slug. Metadata (title, description,
-date, and later tags, reading time, SEO fields) is expected to be exported from
-the MDX file itself; the exact shape and the content types are defined when
-the first content type is implemented. No content exists yet.
+`content/engineering/` or `content/projects/`; the directory name is the slug.
+A project directory holds `project.ts`, its typed metadata, and `index.mdx`,
+its case-study body. Metadata lives in TypeScript rather than as an MDX export
+so the compiler checks it; `lib/content/projects.ts` registers the projects
+and every Work page reads from it. Adding a project needs no change to the
+Work pages. Details: "Content" in [`project-structure.md`](project-structure.md).
+No engineering articles exist yet.
 
 ## Server-first approach
 

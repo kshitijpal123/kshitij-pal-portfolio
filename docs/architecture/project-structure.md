@@ -27,11 +27,19 @@ Project code lives outside `app/`. `app/` contains only routing files
 
 ## Routes
 
-Exists: `/` (`app/page.tsx`), the Home page. It currently renders the hero,
-the Experience section, the Currently Working On section, and the Let's
-Connect call to action, in that order.
+Exists:
 
-Intended route map (not implemented; routes are added when their content
+- `/` (`app/page.tsx`), the Home page. It renders the hero, the Experience
+  section, the Currently Working On section, and the Let's Connect call to
+  action, in that order.
+- `/work` (`app/work/page.tsx`), the project index. It lists every project in
+  `lib/content/projects.ts` and has no per-project code.
+- `/work/[slug]` (`app/work/[slug]/page.tsx`), a project case study. It is
+  statically generated for each registered project (`generateStaticParams`)
+  with `dynamicParams = false`, so unknown slugs return 404. The first and
+  currently only case study is `/work/billsync`.
+
+Intended route map (routes not listed above are added when their content
 exists):
 
 | Route                 | Purpose                                      |
@@ -121,10 +129,33 @@ Working On" section. It renders the typed items in `lib/site/currentWork.ts`;
 an item links to its case study only when `href` is set. From `lg` it shares
 the Experience section's three-column grid (heading in the first column,
 content in the other two), so both sections align on one editorial axis and
-the project reads as current work rather than a feature block. Its first link,
-`/work/billsync`, points at the intended case-study route and returns 404
-until that route exists, like the other intended routes already linked from
-the site.
+the project reads as current work rather than a feature block. Its link to
+`/work/billsync` opens the BillSync case study.
+
+`components/work/` also holds the Work index and case-study components. All
+are Server Components; the only client code is the motion primitives they
+wrap.
+
+| Component             | Role                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| `ProjectEntry`        | One Work index entry: type, title, tagline, status, summary, technical areas, links       |
+| `ProjectHeader`       | Case-study hero from project metadata: eyebrow, h1, lede, status, focus, problem/solution |
+| `ProjectSection`      | One case-study section on the Home three-column grid; h2 in the first column              |
+| `CaseStudyNav`        | Closing navigation shared by every case study (Back to Work, Let's connect)               |
+| `FlowDiagram`         | A captioned `<ol>` drawn as a vertical rail; steps take a description and a detail        |
+| `FlowComparison`      | Flows side by side from `md`, each with a note                                            |
+| `StageComparison`     | Stages separated by "≠", side by side from `md`                                           |
+| `ArchitectureDiagram` | An `<ol>` of layers; parallel nodes form a labelled group, side by side from `sm`         |
+| `DataModelOverview`   | Tables grouped by responsibility; each group is an h3 over a term list                    |
+| `TenancyDiagram`      | A platform containing tenants and their roles, as nested boxes over nested lists          |
+| `DecisionList`        | Numbered decisions, each an h3 with its rationale                                         |
+| `StatusSummary`       | Project state in groups, such as established, current direction, planned next             |
+
+The diagram components take their content as props, so a case study supplies
+its own steps, nodes, and tables from MDX. Every diagram is HTML lists with
+text; drawn parts (arrows, rails, step numbers, "≠") are `aria-hidden`, so
+the diagrams read the same to assistive technology and without CSS. On narrow
+screens they become vertical flows rather than shrinking.
 
 `components/contact/` holds `ConnectSection`, the Home page call to action
 that points to `/contact`. It is not the Contact page. Its LinkedIn link
@@ -165,7 +196,61 @@ analytics) lives in that domain's directory.
 ## Content
 
 Content is local MDX, compiled by `@next/mdx` (see
-[ADR 0001](../adr/0001-local-mdx-content.md)). No content exists yet.
+[ADR 0001](../adr/0001-local-mdx-content.md)). Projects exist; engineering
+articles do not yet.
+
+### Projects
+
+Each project is a directory under `content/projects/` holding two files:
+
+```
+content/projects/<slug>/
+  project.ts   Typed metadata (ProjectDefinition); imports ./index.mdx
+  index.mdx    The case-study body
+```
+
+**Metadata and content are split on purpose.** `project.ts` is TypeScript, so
+`tsc` checks every field against `ProjectDefinition` in
+`lib/content/projects.ts`; exports from an MDX file are not type-checked.
+Metadata is what other pages need without rendering the case study: the Work
+index entry, the case-study header, and the route's title and description.
+`index.mdx` holds only the long-form body: `ProjectSection` blocks of prose
+and diagrams, with the diagram data written inline as props. No field is
+declared in both places.
+
+`ProjectDefinition` fields: `slug` (kebab-case, equal to the directory
+name), `title`, `tagline`, `summary`, `lede`, `status`, `type`,
+`technologies` (Work index), `focus` (case-study header), `problem`,
+`solution`, `metaTitle`, `featured`, optional `links` (real public
+destinations only), and `CaseStudy` (the MDX component). `href` is derived as
+`/work/<slug>` by the registry.
+
+`lib/content/projects.ts` is the registry: it lists the definitions, derives
+`href`, orders featured projects first (registry order otherwise), and
+exposes `projects` and `getProject(slug)`. The Work index, the case-study
+route, `generateStaticParams`, and the metadata all read from it.
+
+To add a project:
+
+1. Create `content/projects/<slug>/index.mdx` with the case study.
+2. Create `content/projects/<slug>/project.ts` exporting a
+   `ProjectDefinition` that imports `./index.mdx`.
+3. Add it to `definitions` in `lib/content/projects.ts`.
+
+The Work index, the route, static generation, and metadata pick it up with
+no other change. Only real projects are added; there are no placeholders.
+
+The Home page "Currently Working On" item (`lib/site/currentWork.ts`) is a
+separate editorial list and still states BillSync's status and description
+itself; keep it in step when those change.
+
+`mdx-components.tsx` styles Markdown elements (`p`, `ul`, `ol`, `h3`,
+`strong`, `code`) for all MDX. Layout components are imported inside each
+MDX file. Vitest compiles MDX with `@mdx-js/mdx` through a small plugin in
+`vitest.config.mts`, using the same `mdx-components.tsx`, so tests render
+real case-study content.
+
+### Engineering articles
 
 Intended layout:
 
@@ -175,26 +260,15 @@ content/
     <article-slug>/
       index.mdx
       <optional assets>
-  projects/
-    <project-slug>/
-      index.mdx
-      <optional assets>
 ```
 
 - Each piece of content is a kebab-case directory; the directory name is the
   slug.
 - The entry file is always `index.mdx`. Assets used only by that piece sit
   beside it.
-- Content must support, as requirements emerge: title, description, date,
-  slug, tags, reading time, and SEO metadata. The slug comes from the
-  directory name; the rest is expected to be declared in the MDX file.
-- `@next/mdx` does not parse frontmatter by default. The expected approach is
-  an `export const metadata = { … }` statement inside each MDX file, which
-  requires no extra dependency. The exact metadata shape is decided when the
-  first content type is implemented.
-- Content types (for example `EngineeringArticle`, `ProjectCaseStudy`) will
-  live in `lib/content/` next to the loader that uses them. They are not
-  defined yet because no content requirements exist to define them against.
+- Articles are expected to follow the project convention (typed metadata
+  beside the MDX, a registry in `lib/content/`); the article type is defined
+  when the first article exists.
 
 ## Static assets
 
@@ -217,12 +291,12 @@ No portrait exists yet. To show one in the Home hero, add the photo to
 
 ## Tests
 
-| Directory           | Tests for                   | Status             |
-| ------------------- | --------------------------- | ------------------ |
-| `tests/app/`        | Routes in `app/`            | Exists (root page) |
-| `tests/components/` | Components in `components/` | Exists             |
-| `tests/lib/`        | Modules in `lib/`           | Exists             |
-| `tests/helpers/`    | Test-only utilities         | Exists             |
+| Directory           | Tests for                   | Status                                |
+| ------------------- | --------------------------- | ------------------------------------- |
+| `tests/app/`        | Routes in `app/`            | Exists (`/`, `/work`, `/work/[slug]`) |
+| `tests/components/` | Components in `components/` | Exists                                |
+| `tests/lib/`        | Modules in `lib/`           | Exists                                |
+| `tests/helpers/`    | Test-only utilities         | Exists                                |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at
