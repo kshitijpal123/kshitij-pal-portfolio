@@ -1,8 +1,9 @@
 # Architecture Overview
 
-Status: SEO, accessibility, and performance hardening (Milestone 8), after
-the contact page and form delivery (Milestone 7) and the evolved Experience
-journey (Milestone 6.5). This document
+Status: AWS production deployment infrastructure (Milestone 9), after SEO,
+accessibility, and performance hardening (Milestone 8), the contact page and
+form delivery (Milestone 7), and the evolved Experience journey
+(Milestone 6.5). This document
 describes the intended shape of the system and what exists today. It is
 updated as parts are implemented.
 
@@ -31,7 +32,7 @@ Resend (see "Contact form" below).
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
-| Deployment    | Production hosting on AWS.                                 | Not started                    |
+| Deployment    | CloudFront, Lambda (Next.js standalone), S3; see below.    | Implemented, not yet deployed  |
 
 Contact form delivery (Resend) is implemented. Planned integrations, not
 implemented yet: error monitoring (Sentry) and analytics (Google Analytics).
@@ -41,6 +42,13 @@ accessibility and performance conventions are described in
 Environment variables are introduced only when a feature requires them: the
 three contact form settings and `SITE_URL`, the canonical origin, all in
 `.env.example`.
+
+Production runs on AWS: CloudFront in front of the Next.js standalone server
+on Lambda (through the AWS Lambda Web Adapter) and an S3 bucket for
+`/_next/static`, defined in CloudFormation under `infra/` and deployed by
+GitHub Actions on every push to `main`. Architecture, setup, caching,
+secrets, and operations: [`deployment.md`](deployment.md); the choice is
+recorded in [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 
 ## Principles
 
@@ -71,7 +79,8 @@ components/about/    AboutHeader, AboutSection, AboutNav
 components/work/     CurrentWorkSection, Work index and case-study components,
                      diagram components
 components/engineering/  ArticleList, ArticleEntry, ArticleHeader, ArticleNav
-components/contact/  ConnectSection, ContactForm, ContactField, ContactLinks
+components/contact/  ConnectSection, ContactForm, ContactField, ContactDetails,
+                     ContactLinks
 components/seo/      JsonLd (structured-data script)
 content/projects/    <slug>/project.ts (metadata) and index.mdx (case study)
 content/engineering/ <slug>/article.ts (metadata) and index.mdx (article body)
@@ -91,6 +100,8 @@ lib/motion/          tokens.ts, variants.ts (Motion for React values)
 lib/utils/           cx.ts (class-name joining)
 mdx-components.tsx   Global MDX component mapping
 tests/               setup.ts, helpers/, app/, components/, lib/
+infra/               portfolio.yaml, bootstrap.yaml (CloudFormation),
+                     package-server.mts, lambda/run.sh
 docs/                architecture/, adr/
 ```
 
@@ -143,8 +154,10 @@ Everything in the shell is a Server Component except three small Client
 Components in `components/navigation/`: `NavLink` (reads the pathname for the
 active item), `MobileNav` (menu open state), and `ThemeSwitcher` (theme
 preference).
-Identity, navigation items, social links, the résumé path, and the portrait
-live in `lib/site/config.ts`; components never hard-code them. A social link,
+Identity, navigation items, social links, direct contact (email and phone),
+the résumé path, and the portrait live in `lib/site/config.ts`; components
+never hard-code them. The footer and the Contact page both render
+`siteConfig.contact` as `mailto:` and `tel:` links. A social link,
 the résumé links, or the portrait (Home hero and About) renders only when it
 is set. No résumé PDF exists yet, so `resumeHref` is `null` and no résumé
 link is rendered anywhere; see "Static assets" in
@@ -248,9 +261,11 @@ network call. To try real delivery, copy `.env.example` to `.env.local`
 (git-ignored), set a real key, a verified sender, and your own inbox, then run
 `npm run dev`. Without these, submissions return the generic error.
 
-**Production.** Set the three variables in the hosting environment's secret
-configuration, not in the repository. The sender's domain must be verified in
-Resend.
+**Production.** The three variables come from the GitHub `production`
+environment (the key as a secret) and reach the Lambda function's
+environment through the deploy job; they are never in the repository. The
+sender's domain must be verified in Resend. See "Secrets and environment
+variables" in [`deployment.md`](deployment.md).
 
 ## Server-first approach
 

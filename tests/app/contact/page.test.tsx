@@ -20,7 +20,19 @@ describe("ContactPage", () => {
       screen
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
-    ).toEqual(["Send a message", "Elsewhere"]);
+    ).toEqual(["Send a message", "Direct", "Elsewhere"]);
+  });
+
+  it("links the email address and phone number from the site config", () => {
+    render(<ContactPage />);
+
+    const direct = within(screen.getByRole("region", { name: "Direct" }));
+    expect(
+      direct.getByRole("link", { name: "kshitij180123@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:kshitij180123@gmail.com");
+    expect(
+      direct.getByRole("link", { name: "+91 8791243983" }),
+    ).toHaveAttribute("href", "tel:+918791243983");
   });
 
   it("introduces the page professionally", () => {
@@ -75,12 +87,12 @@ describe("ContactPage", () => {
   });
 
   it("links the résumé when it is configured", () => {
-    siteConfig.resumeHref = "/resume/kshitij-pal-resume.pdf";
+    siteConfig.resumeHref = "/resume/Kshitij-Pal-Resume.pdf";
     render(<ContactPage />);
 
     expect(screen.getByRole("link", { name: "Resume (PDF)" })).toHaveAttribute(
       "href",
-      "/resume/kshitij-pal-resume.pdf",
+      "/resume/Kshitij-Pal-Resume.pdf",
     );
   });
 

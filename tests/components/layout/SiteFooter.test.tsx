@@ -22,6 +22,20 @@ describe("SiteFooter", () => {
     ).toBeInTheDocument();
   });
 
+  it("links the email address and phone number from the site config", () => {
+    const { container } = render(<SiteFooter />);
+
+    const address = container.querySelector("footer address");
+    expect(address).not.toBeNull();
+    const links = within(address as HTMLElement).getAllByRole("link");
+    expect(
+      links.map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["kshitij180123@gmail.com", "mailto:kshitij180123@gmail.com"],
+      ["+91 8791243983", "tel:+918791243983"],
+    ]);
+  });
+
   it("renders site navigation", () => {
     render(<SiteFooter />);
 

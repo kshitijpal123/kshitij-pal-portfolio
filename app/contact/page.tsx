@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ContactDetails } from "@/components/contact/ContactDetails";
 import { ContactForm } from "@/components/contact/ContactForm";
 import { ContactLinks } from "@/components/contact/ContactLinks";
 import { Container } from "@/components/ui/Container";
@@ -37,7 +38,8 @@ export default function ContactPage() {
           <ContactForm />
         </div>
 
-        <div className="lg:col-start-1 lg:row-start-2">
+        <div className="space-y-8 lg:col-start-1 lg:row-start-2">
+          <ContactDetails />
           <ContactLinks />
         </div>
       </Container>

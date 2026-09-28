@@ -46,12 +46,12 @@ describe("ContactLinks", () => {
   });
 
   it("links the résumé once it is configured", () => {
-    siteConfig.resumeHref = "/resume/kshitij-pal-resume.pdf";
+    siteConfig.resumeHref = "/resume/Kshitij-Pal-Resume.pdf";
     render(<ContactLinks />);
 
     expect(screen.getByRole("link", { name: "Resume (PDF)" })).toHaveAttribute(
       "href",
-      "/resume/kshitij-pal-resume.pdf",
+      "/resume/Kshitij-Pal-Resume.pdf",
     );
   });
 

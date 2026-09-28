@@ -18,6 +18,19 @@ export function SiteFooter() {
             <p className="mt-1 font-mono text-meta text-muted-foreground uppercase">
               {siteConfig.role}
             </p>
+            {siteConfig.contact.length > 0 && (
+              <address className="mt-4 not-italic">
+                <ul>
+                  {siteConfig.contact.map((method) => (
+                    <li key={method.label}>
+                      <Link href={method.href} variant="nav">
+                        {method.value}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </address>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-x-16 gap-y-8">

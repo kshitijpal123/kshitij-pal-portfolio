@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Portfolio production: CloudFront in front of the Next.js standalone server on
+  AWS Lambda (function URL, Lambda Web Adapter) and an S3 bucket for
+  /_next/static. Deployed by GitHub Actions; see docs/architecture/deployment.md.
+
+Parameters:
+  LambdaAdapterLayerVersion:
+    Type: Number
+    Description: Version of the AWS Lambda Web Adapter layer (LambdaAdapterLayerX86).
+    Default: 30
+  ResendApiKey:
+    Type: String
+    Description: Resend API key. Empty disables delivery (POST /api/contact returns 500).
+    Default: ""
+    NoEcho: true
+  ContactToEmail:
+    Type: String
+    Description: Inbox that receives contact form messages.
+    Default: ""
+  ContactFromEmail:
+    Type: String
+    Description: Resend-verified sender, for example "Portfolio <contact@domain.tld>".
+    Default: ""
+
+Resources:
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-assets-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AssetsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadsStaticAssets
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${AssetsBucket.Arn}/_next/static/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  ServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-server"
+      RetentionInDays: 30
+
+  ServerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/${AWS::StackName}-lambda-boundary"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ServerLogGroup.Arn
+
+  ServerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-server"
+      Description: Next.js standalone server behind the Lambda Web Adapter.
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      Handler: run.sh
+      # Replaced with an S3 location by `aws cloudformation package`.
+      Code: ../.aws-build/server
+      MemorySize: 1024
+      Timeout: 15
+      Role: !GetAtt ServerFunctionRole.Arn
+      Layers:
+        - !Sub "arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:${LambdaAdapterLayerVersion}"
+      LoggingConfig:
+        LogGroup: !Ref ServerLogGroup
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          PORT: "8000"
+          RESEND_API_KEY: !Ref ResendApiKey
+          CONTACT_TO_EMAIL: !Ref ContactToEmail
+          CONTACT_FROM_EMAIL: !Ref ContactFromEmail
+
+  # AWS_IAM (CloudFront origin access control) would require browsers to sign
+  # POST bodies with x-amz-content-sha256, which the contact form cannot do.
+  ServerFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ServerFunction.Arn
+      AuthType: NONE
+      InvokeMode: BUFFERED
+
+  ServerFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ServerFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ServerFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ServerFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  AssetsOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-assets"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Honors the origin's Cache-Control (s-maxage on prerendered pages, none on
+  # dynamic responses). The RSC headers and every query string (_rsc) are in
+  # the key so HTML and React Server Component payloads never share an entry.
+  ServerCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${AWS::StackName}-server"
+        MinTTL: 0
+        DefaultTTL: 0
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - rsc
+              - next-router-prefetch
+              - next-router-state-tree
+              - next-router-segment-prefetch
+              - next-url
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
+  # Mirrors the headers in next.config.ts for responses served from S3.
+  StaticAssetsHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-static-headers"
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Permissions-Policy
+              Value: camera=(), microphone=(), geolocation=()
+              Override: true
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "${AWS::StackName} portfolio"
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: server
+            DomainName:
+              !Select [2, !Split ["/", !GetAtt ServerFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+          - Id: assets
+            DomainName: !GetAtt AssetsBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt AssetsOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: server
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref ServerCachePolicy
+          # Managed AllViewerExceptHostHeader: a function URL only accepts its own Host.
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CacheBehaviors:
+          - PathPattern: /_next/static/*
+            TargetOriginId: assets
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            # Managed CachingOptimized.
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            ResponseHeadersPolicyId: !Ref StaticAssetsHeadersPolicy
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  SiteUrl:
+    Description: Production origin. Set it as the GitHub variable SITE_URL.
+    Value: !Sub "https://${Distribution.DomainName}"
+  DistributionId:
+    Value: !Ref Distribution
+  AssetsBucketName:
+    Value: !Ref AssetsBucket
+  ServerFunctionName:
+    Value: !Ref ServerFunction

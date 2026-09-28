@@ -1,4 +1,5 @@
 .next/
+.aws-build/
 out/
 build/
 coverage/

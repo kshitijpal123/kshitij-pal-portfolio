@@ -20,7 +20,9 @@ build).
   or hash). A malformed value throws and fails the build.
 
 To go live, set `SITE_URL` in the production build environment; no code
-changes are needed. Tests pin `SITE_URL` to empty (`vitest.config.mts`) and
+changes are needed. In production it is the `SITE_URL` variable of the
+GitHub `production` environment: the CloudFront URL after the first deploy,
+and the custom domain later (see [`deployment.md`](deployment.md)). Tests pin `SITE_URL` to empty (`vitest.config.mts`) and
 stub it where they need a URL, using the reserved `portfolio.test` domain.
 
 ## Metadata
@@ -139,5 +141,7 @@ built from repository content only; contact form input never reaches it.
 - `next.config.ts` sets `X-Content-Type-Options`, `Referrer-Policy`, and
   `Permissions-Policy`, and removes `X-Powered-By`. A Content Security Policy
   is deferred to the hosting setup: the inline theme script and JSON-LD would
-  need hashes or nonces. These headers apply when Next.js serves the site; a
-  CDN in front must preserve or replicate them.
+  need hashes or nonces. These headers apply when Next.js serves the site;
+  in production CloudFront passes them through and repeats them for the
+  static assets it serves from S3 (see "Security headers" in
+  [`deployment.md`](deployment.md)).

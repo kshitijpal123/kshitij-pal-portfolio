@@ -20,6 +20,9 @@
 # production
 /build
 
+# aws deployment package
+/.aws-build/
+
 # misc
 .DS_Store
 Thumbs.db

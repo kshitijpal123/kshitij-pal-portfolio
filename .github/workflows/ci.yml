@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a production deployment part-way through.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -29,3 +30,139 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.SITE_URL }}
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      STACK_NAME: portfolio-production
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - name: Check deployment configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          AWS_CLOUDFORMATION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}
+          AWS_ARTIFACTS_BUCKET: ${{ vars.AWS_ARTIFACTS_BUCKET }}
+        run: |
+          missing=0
+          for name in AWS_REGION AWS_DEPLOY_ROLE_ARN AWS_CLOUDFORMATION_ROLE_ARN AWS_ARTIFACTS_BUCKET; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Variable $name is not set on the production environment. See docs/architecture/deployment.md."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+
+      - name: Assemble Lambda package
+        run: node infra/package-server.mts
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Assets go up before the new server so fresh HTML never references a
+      # missing file. Old hashed files are kept for pages still cached.
+      - name: Upload static assets (existing stack)
+        run: |
+          bucket=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='AssetsBucketName'].OutputValue" \
+            --output text 2>/dev/null || true)
+          if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
+            aws s3 sync .next/static "s3://$bucket/_next/static" \
+              --cache-control "public, max-age=31536000, immutable"
+          else
+            echo "Stack not created yet; assets are uploaded after the first deploy."
+          fi
+
+      - name: Package CloudFormation template
+        run: |
+          aws cloudformation package \
+            --template-file infra/portfolio.yaml \
+            --s3-bucket "${{ vars.AWS_ARTIFACTS_BUCKET }}" \
+            --s3-prefix "$STACK_NAME" \
+            --output-template-file .aws-build/portfolio.packaged.yaml
+
+      - name: Deploy stack
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          CONTACT_TO_EMAIL: ${{ vars.CONTACT_TO_EMAIL }}
+          CONTACT_FROM_EMAIL: ${{ vars.CONTACT_FROM_EMAIL }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_NAME" \
+            --template-file .aws-build/portfolio.packaged.yaml \
+            --role-arn "${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}" \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "ResendApiKey=$RESEND_API_KEY" \
+              "ContactToEmail=$CONTACT_TO_EMAIL" \
+              "ContactFromEmail=$CONTACT_FROM_EMAIL"
+
+      - name: Read stack outputs
+        id: stack
+        run: |
+          output() {
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          echo "bucket=$(output AssetsBucketName)" >> "$GITHUB_OUTPUT"
+          echo "distribution=$(output DistributionId)" >> "$GITHUB_OUTPUT"
+          echo "url=$(output SiteUrl)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload static assets
+        run: |
+          aws s3 sync .next/static "s3://${{ steps.stack.outputs.bucket }}/_next/static" \
+            --cache-control "public, max-age=31536000, immutable"
+
+      - name: Invalidate CloudFront
+        run: |
+          id=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.stack.outputs.distribution }}" \
+            --paths "/*" --query Invalidation.Id --output text)
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ steps.stack.outputs.distribution }}" --id "$id"
+
+      - name: Smoke test
+        env:
+          URL: ${{ steps.stack.outputs.url }}
+        run: |
+          check() {
+            status=$(curl -s -o /dev/null -w "%{http_code}" -X "$1" "$URL$2")
+            echo "$1 $2 -> $status"
+            [ "$status" = "$3" ]
+          }
+          check GET / 200
+          check GET /work/billsync 200
+          check GET /robots.txt 200
+          check GET /sitemap.xml 200
+          check GET /api/contact 405
+          check GET /this-page-does-not-exist 404
+          if [ -z "${{ vars.SITE_URL }}" ]; then
+            echo "::warning::SITE_URL is not set, so canonical URLs and sitemap entries are omitted. Set it to $URL and redeploy."
+          fi

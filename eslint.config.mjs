@@ -9,6 +9,7 @@ const eslintConfig = defineConfig([
   prettier,
   globalIgnores([
     ".next/**",
+    ".aws-build/**",
     "out/**",
     "build/**",
     "coverage/**",

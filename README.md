@@ -2,9 +2,10 @@
 
 Source for my personal Backend Engineer portfolio.
 
-> **Status: under development.** Only the application foundation exists
-> (tooling, configuration, and architecture docs). No portfolio pages or
-> content have been built yet.
+> **Status:** every page is built. AWS deployment infrastructure and the
+> GitHub Actions deploy job exist; the first production deployment is pending
+> the one-time AWS setup in
+> [`docs/architecture/deployment.md`](docs/architecture/deployment.md).
 
 ## Purpose
 
@@ -14,16 +15,16 @@ studies and engineering writing.
 
 ## Stack
 
-| Concern    | Choice                                  |
-| ---------- | --------------------------------------- |
-| Framework  | Next.js 16 (App Router), React 19       |
-| Language   | TypeScript (strict mode)                |
-| Styling    | Tailwind CSS v4                         |
-| Content    | Local MDX via `@next/mdx`               |
-| Testing    | Vitest, React Testing Library, jsdom    |
-| Quality    | ESLint (`eslint-config-next`), Prettier |
-| CI         | GitHub Actions                          |
-| Deployment | AWS (planned)                           |
+| Concern    | Choice                                       |
+| ---------- | -------------------------------------------- |
+| Framework  | Next.js 16 (App Router), React 19            |
+| Language   | TypeScript (strict mode)                     |
+| Styling    | Tailwind CSS v4                              |
+| Content    | Local MDX via `@next/mdx`                    |
+| Testing    | Vitest, React Testing Library, jsdom         |
+| Quality    | ESLint (`eslint-config-next`), Prettier      |
+| CI         | GitHub Actions                               |
+| Deployment | AWS: CloudFront, Lambda, S3 (CloudFormation) |
 
 There is no database, CMS, authentication, or separate backend service. The
 contact form posts to a Next.js Route Handler that sends email through
@@ -50,17 +51,17 @@ npm install
 npm run dev          # start the dev server at http://localhost:3000
 ```
 
-| Command                | Description                                 |
-| ---------------------- | ------------------------------------------- |
-| `npm run dev`          | Start the development server                |
-| `npm run build`        | Create a production build                   |
-| `npm run start`        | Serve the production build                  |
-| `npm run lint`         | Run ESLint                                  |
-| `npm run typecheck`    | Generate route types and run `tsc --noEmit` |
-| `npm run test`         | Run the test suite once                     |
-| `npm run test:watch`   | Run tests in watch mode                     |
-| `npm run format`       | Format files with Prettier                  |
-| `npm run format:check` | Verify formatting (used in CI)              |
+| Command                | Description                                           |
+| ---------------------- | ----------------------------------------------------- |
+| `npm run dev`          | Start the development server                          |
+| `npm run build`        | Create a production build                             |
+| `npm run start`        | Serve the production build (warns: standalone output) |
+| `npm run lint`         | Run ESLint                                            |
+| `npm run typecheck`    | Generate route types and run `tsc --noEmit`           |
+| `npm run test`         | Run the test suite once                               |
+| `npm run test:watch`   | Run tests in watch mode                               |
+| `npm run format`       | Format files with Prettier                            |
+| `npm run format:check` | Verify formatting (used in CI)                        |
 
 The site builds and runs with no environment variables. Only contact form
 delivery needs them: copy `.env.example` to `.env.local` (git-ignored) and set
@@ -74,6 +75,16 @@ absolute URLs are omitted. Set it in the production build once the domain
 exists; see
 [`docs/architecture/seo-accessibility-performance.md`](docs/architecture/seo-accessibility-performance.md).
 
+## Production deployment
+
+Every push to `main` that passes CI is deployed to AWS by the `deploy` job in
+`.github/workflows/ci.yml`: CloudFront in front of the Next.js standalone
+server on Lambda, with `/_next/static` in S3, all defined in CloudFormation
+under `infra/`. GitHub authenticates to AWS through OIDC; no access keys are
+stored. Setup, environment variables, caching, résumé updates, custom
+domain, rollback, and troubleshooting:
+[`docs/architecture/deployment.md`](docs/architecture/deployment.md).
+
 ## Project structure
 
 ```
@@ -85,7 +96,8 @@ public/              Static assets: images, resume, icons       (planned)
 tests/               Vitest + React Testing Library tests
 docs/architecture/   Architecture documentation
 docs/adr/            Architecture decision records
-.github/workflows/   CI pipeline
+infra/               AWS CloudFormation templates and Lambda packaging
+.github/workflows/   CI and production deployment
 mdx-components.tsx   Global MDX component mapping (required by @next/mdx)
 ```
 

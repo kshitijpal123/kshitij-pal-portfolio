@@ -9,6 +9,13 @@ export type SocialLink = {
   href: string | null;
 };
 
+export type ContactMethod = {
+  label: string;
+  /** Shown as the link text. */
+  value: string;
+  href: string;
+};
+
 export type Portrait = {
   /** Path in `public/images/`, for example `/images/portrait.jpg`. */
   src: string;
@@ -23,14 +30,19 @@ type SiteConfig = {
   /** `null` until a real photo exists; the Home hero renders none while unset. */
   portrait: Portrait | null;
   /**
-   * Path of the résumé PDF in `public/resume/`, for example
-   * `/resume/kshitij-pal-resume.pdf`. `null` until the file exists; every
-   * résumé link is hidden while it is unset.
+   * Always `/resume/Kshitij-Pal-Resume.pdf` (the file in `public/resume/`)
+   * once the PDF exists; the name never changes, so a new résumé replaces the
+   * file. `null` until then; every résumé link is hidden while it is unset.
    */
   resumeHref: string | null;
   nav: readonly NavItem[];
   social: readonly SocialLink[];
+  /** Direct contact, shown in the footer and on the Contact page. */
+  contact: readonly ContactMethod[];
 };
+
+const email = "kshitij180123@gmail.com";
+const phone = "+91 8791243983";
 
 export const siteConfig: SiteConfig = {
   name: "Kshitij Pal",
@@ -51,5 +63,9 @@ export const siteConfig: SiteConfig = {
       label: "LinkedIn",
       href: "https://www.linkedin.com/in/kshitij-pal-963247195",
     },
+  ],
+  contact: [
+    { label: "Email", value: email, href: `mailto:${email}` },
+    { label: "Phone", value: phone, href: `tel:${phone.replaceAll(" ", "")}` },
   ],
 };

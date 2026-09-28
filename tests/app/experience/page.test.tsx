@@ -235,13 +235,13 @@ describe("ExperiencePage", () => {
   });
 
   it("offers the configured resume for download", () => {
-    siteConfig.resumeHref = "/resume/kshitij-pal-resume.pdf";
+    siteConfig.resumeHref = "/resume/Kshitij-Pal-Resume.pdf";
     render(<ExperiencePage />);
 
     const link = within(
       screen.getByRole("navigation", { name: "Related" }),
     ).getByRole("link", { name: "Download resume (PDF)" });
-    expect(link).toHaveAttribute("href", "/resume/kshitij-pal-resume.pdf");
+    expect(link).toHaveAttribute("href", "/resume/Kshitij-Pal-Resume.pdf");
     expect(link).toHaveAttribute("download");
   });
 

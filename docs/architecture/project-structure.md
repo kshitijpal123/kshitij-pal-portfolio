@@ -16,6 +16,7 @@ content/             Local MDX sources
 lib/                 Non-UI modules
 public/              Static assets served from the site root
 tests/               Vitest + React Testing Library tests
+infra/               AWS CloudFormation templates and Lambda packaging
 docs/architecture/   Architecture documentation
 docs/adr/            Architecture decision records
 mdx-components.tsx   Global MDX component mapping (required by @next/mdx)
@@ -264,16 +265,23 @@ that points to `/contact`, and the Contact page components. `ConnectSection`'s
 LinkedIn link comes from `siteConfig.social` and renders only while that URL
 is set.
 
-| Component      | Role                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------- |
-| `ContactForm`  | Client Component: fields, honeypot, submit state, and the status and alert live regions        |
-| `ContactField` | One labelled input or textarea; its error is linked with `aria-describedby` and `aria-invalid` |
-| `ContactLinks` | "Elsewhere": every set `siteConfig.social` link and the résumé once `resumeHref` is set        |
+| Component        | Role                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------- |
+| `ContactForm`    | Client Component: fields, honeypot, submit state, and the status and alert live regions           |
+| `ContactField`   | One labelled input or textarea; its error is linked with `aria-describedby` and `aria-invalid`    |
+| `ContactDetails` | "Direct": the email address and phone number from `siteConfig.contact`, as `mailto:`/`tel:` links |
+| `ContactLinks`   | "Elsewhere": every set `siteConfig.social` link and the résumé once `resumeHref` is set           |
 
 The Contact page is a two-column grid from `lg` on the Home three-column
-axis: the introduction and `ContactLinks` in the first column, the form
-across the other two. Below `lg` it is one column in reading order:
-introduction, form, links. `ContactForm` keeps values after a failure,
+axis: the introduction, then `ContactDetails` and `ContactLinks`, in the
+first column, the form across the other two. Below `lg` it is one column in
+reading order: introduction, form, direct contact, links.
+
+**Direct contact.** `siteConfig.contact` in `lib/site/config.ts` is the only
+place the email address and phone number are written; each entry has a
+`label`, the displayed `value`, and the `href` derived from it. The footer
+(inside an `<address>`) and `ContactDetails` both render that list. They are
+not added to metadata or structured data. `ContactForm` keeps values after a failure,
 clears them after a successful send, and keeps focus on the submit button
 while sending (`aria-disabled`, not `disabled`); on a client-side validation
 failure it focuses the first invalid field.
@@ -487,6 +495,10 @@ real article and case-study content.
 | `public/resume/` | Downloadable résumé      |
 | `public/icons/`  | Favicons and icon assets |
 
+In production every `public/` file is served by the Next.js server on
+Lambda, not from S3, with `Cache-Control: public, max-age=0`, so a replaced
+file is live after the next deploy.
+
 Images that belong to a single article or case study live with that content
 in `content/`, not in `public/`.
 
@@ -503,19 +515,26 @@ menu, footer) returns nothing, the Experience page omits its download
 button, and the Contact page's `ContactLinks` omits its résumé link. Nothing
 points at a missing file.
 
-To publish or replace it:
+The path is fixed: `public/resume/Kshitij-Pal-Resume.pdf`, served at
+`/resume/Kshitij-Pal-Resume.pdf`. There are no versioned filenames.
 
-1. Add the real PDF as `public/resume/kshitij-pal-resume.pdf`. It is served
-   from `/resume/kshitij-pal-resume.pdf`; no filesystem path is exposed.
-2. Set `resumeHref: "/resume/kshitij-pal-resume.pdf"` in
+To publish it the first time:
+
+1. Add the real PDF as `public/resume/Kshitij-Pal-Resume.pdf`. No
+   filesystem path is exposed.
+2. Set `resumeHref: "/resume/Kshitij-Pal-Resume.pdf"` in
    `lib/site/config.ts`.
 3. Update the "has no résumé configured" assertion in
    `tests/components/navigation/ResumeLink.test.tsx`, then run the checks.
 
 No component changes are needed. Every link reads the same `resumeHref`: the
 "Resume" navigation links open the PDF in the same tab, and the Experience
-page's "Download resume (PDF)" link has the `download` attribute. To update
-the résumé later, replace the file under the same name.
+page's "Download resume (PDF)" link has the `download` attribute.
+
+To update it later, replace the file under the same name, commit, and push;
+GitHub Actions deploys it and the new file is served as soon as the deploy
+finishes (the résumé is not cached at the edge). See "Updating the résumé"
+in [`deployment.md`](deployment.md).
 
 ### Portrait
 
@@ -523,6 +542,20 @@ No portrait exists yet. To show one, add the photo to `public/images/` and
 set `portrait` (path, alt text, and intrinsic size) in `lib/site/config.ts`.
 It then appears in the Home hero (in place of the technical visual) and in
 the About header's side column.
+
+## Infrastructure
+
+`infra/` holds the AWS deployment, described in
+[`deployment.md`](deployment.md):
+
+| File                 | Purpose                                                                   |
+| -------------------- | ------------------------------------------------------------------------- |
+| `portfolio.yaml`     | Application stack: CloudFront, Lambda, function URL, S3 assets, log group |
+| `bootstrap.yaml`     | One-time stack: GitHub OIDC trust, deploy and CloudFormation roles        |
+| `package-server.mts` | Assembles `.aws-build/server` (the Lambda package) after `next build`     |
+| `lambda/run.sh`      | Lambda handler; starts `server.js` behind the Lambda Web Adapter          |
+
+`.aws-build/` is generated and git-ignored.
 
 ## Tests
 
