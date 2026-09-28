@@ -304,13 +304,21 @@ why it is abstract rather than literal space imagery).
   About 1.8 s in all. Text never waits: the milestone list reveals with the
   standard stagger, independently of the drawing.
 
-- **Live current stage.** After the rings settle, the current stage's outer
-  (dashed) ring breathes to show the trajectory is still active: scale
-  1 → 1.08 → 1 and opacity 0.7 → 0.25 → 0.7 over 2.8 s, `easeInOut`,
-  repeating. It is the only loop in the journey; the center dot, inner
-  ring, other stages, line, and text never loop. It runs only while the
-  trajectory is on screen, and rests at opacity 0.7 without script and
-  under reduced motion. The mobile rail marker is static.
+- **Live current stage.** After the rings settle, the current stage acts as
+  a quiet beacon, to show the trajectory is still active:
+  - The marker (inner ring, accent ring, and dot) breathes as one about its
+    center: scale 1 → 1.1 → 1 over 3 s, `easeInOut`, repeating. Its scale
+    is a motion value rather than a variant, so its parts keep their
+    entrance.
+  - The outer (dashed) ring pulses outward: scale 1 → 1.08 → 1 and opacity
+    0.7 → 0.25 → 0.7 over 2.8 s, `easeInOut`, repeating. The different
+    periods keep the two drifting in and out of phase.
+
+  These are the only loops in the journey; other stages, the line, the
+  current trajectory marker, and text never loop. Both run only while the
+  trajectory is on screen, restarting when it returns, and rest (scale 1,
+  outer ring at opacity 0.7) without script and under reduced motion. The
+  mobile rail marker is static.
 
 - **Why viewport-triggered rather than scroll-driven.** Tying progress to
   scroll position would leave the line half drawn wherever the reader
@@ -345,6 +353,7 @@ why it is abstract rather than literal space imagery).
 - Viewport-triggered, once. Nothing animates while off screen. The journey
   trajectory's entrance runs once. The only continuous animations are the
   hero visual's flow (two SVG circles moving by `transform`, resting 5 s per
-  cycle) and the journey's current-stage ring (one SVG circle by `transform`
-  and opacity); both stop off screen and under reduced motion.
+  cycle) and the journey's current-stage beacon (one SVG group by `transform`
+  and one circle by `transform` and opacity); all stop off screen and under
+  reduced motion.
 - Transforms do not affect layout, so reveals cause no layout shift.

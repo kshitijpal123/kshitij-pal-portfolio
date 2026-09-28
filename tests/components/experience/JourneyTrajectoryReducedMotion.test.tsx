@@ -51,5 +51,8 @@ describe("JourneyTrajectory with prefers-reduced-motion", () => {
     expect(pulse).toHaveStyle({ opacity: "0.7" });
     expect(pulse?.getAttribute("style") ?? "").not.toMatch(/scale\((?!1\))/);
     expect(container.querySelector('circle[r="17"]')).toBeInTheDocument();
+    const beacon = container.querySelector("[data-journey-beacon]");
+    expect(beacon?.getAttribute("style") ?? "").not.toMatch(/scale\((?!1\))/);
+    expect(beacon?.querySelector("circle.fill-accent")).toBeInTheDocument();
   }, 5000);
 });

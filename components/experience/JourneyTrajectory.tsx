@@ -1,8 +1,16 @@
 "use client";
 
-import { useReducedMotionConfig, type Variants } from "motion/react";
+import {
+  animate,
+  useInView,
+  useMotionValue,
+  useReducedMotionConfig,
+  type MotionValue,
+  type Transition,
+  type Variants,
+} from "motion/react";
 import * as m from "motion/react-m";
-import { useId } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { MotionScope } from "@/components/motion/MotionScope";
 import { duration, ease, technical } from "@/lib/motion/tokens";
 import { revealViewport } from "@/lib/motion/variants";
@@ -151,6 +159,58 @@ export const livePulseVariants: Variants = {
 
 const livePulseViewport = { once: false, amount: "some" } as const;
 
+/**
+ * The current stage's marker (inner ring, accent ring, and dot) breathes
+ * about its center, a little slower than the outer ring so the two drift in
+ * and out of phase.
+ */
+export const beacon = {
+  duration: 3,
+  scale: [1, 1.1, 1],
+  /** Seconds after first entering the viewport: once the rings settle. */
+  delay: arrival + duration.normal,
+} as const;
+
+export function beaconTransition(delay: number): Transition {
+  return {
+    delay,
+    duration: beacon.duration,
+    ease: "easeInOut",
+    repeat: Infinity,
+  };
+}
+
+/**
+ * Loops the beacon scale only while the trajectory is on screen and motion is
+ * allowed. The motion value is not a variant, so the marker's parts keep
+ * following the entrance variants of the svg.
+ */
+function useBeaconScale(
+  ref: RefObject<SVGSVGElement | null>,
+  reduce: boolean,
+): MotionValue<number> {
+  const scale = useMotionValue(1);
+  const inView = useInView(ref, { amount: "some" });
+  const firstSeen = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!inView || reduce) return;
+    firstSeen.current ??= performance.now();
+    const elapsed = (performance.now() - firstSeen.current) / 1000;
+    const controls = animate(
+      scale,
+      [...beacon.scale],
+      beaconTransition(Math.max(0, beacon.delay - elapsed)),
+    );
+    return () => {
+      controls.stop();
+      scale.set(1);
+    };
+  }, [inView, reduce, scale]);
+
+  return scale;
+}
+
 function Stage({ x, timing }: { x: number; timing: Timing }) {
   const y = trajectoryY(x);
 
@@ -189,9 +249,12 @@ function Trajectory() {
   });
   const currentY = trajectoryY(currentX);
   const markerY = trajectoryY(markerX);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const beaconScale = useBeaconScale(svgRef, reduce);
 
   return (
     <m.svg
+      ref={svgRef}
       viewBox={`0 0 ${width} ${height}`}
       focusable="false"
       className="block h-auto w-full overflow-visible"
@@ -310,32 +373,37 @@ function Trajectory() {
           strokeDasharray="2 4"
           className="stroke-border-strong"
         />
-        <circle
+      </m.g>
+      <m.g data-journey-beacon="" style={{ scale: beaconScale }}>
+        <m.circle
+          data-motion-reveal=""
+          custom={at(arrival, duration.normal)}
+          variants={emphasisVariants}
           cx={currentX}
           cy={currentY}
           r={17}
           className="stroke-border-strong"
         />
+        <m.circle
+          data-motion-reveal=""
+          custom={at(drawDuration, duration.normal)}
+          variants={nodeVariants}
+          cx={currentX}
+          cy={currentY}
+          r={8}
+          strokeWidth={1.5}
+          className="fill-background stroke-accent"
+        />
+        <m.circle
+          data-motion-reveal=""
+          custom={at(progressStart, progressDuration)}
+          variants={indicatorVariants}
+          cx={currentX}
+          cy={currentY}
+          r={4}
+          className="fill-accent"
+        />
       </m.g>
-      <m.circle
-        data-motion-reveal=""
-        custom={at(drawDuration, duration.normal)}
-        variants={nodeVariants}
-        cx={currentX}
-        cy={currentY}
-        r={8}
-        strokeWidth={1.5}
-        className="fill-background stroke-accent"
-      />
-      <m.circle
-        data-motion-reveal=""
-        custom={at(progressStart, progressDuration)}
-        variants={indicatorVariants}
-        cx={currentX}
-        cy={currentY}
-        r={4}
-        className="fill-accent"
-      />
 
       <m.g
         data-motion-reveal=""

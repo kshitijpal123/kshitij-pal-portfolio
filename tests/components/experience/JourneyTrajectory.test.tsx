@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  beacon,
+  beaconTransition,
   JourneyTrajectory,
   livePulse,
   livePulseVariants,
@@ -109,7 +111,7 @@ describe("JourneyTrajectory live current marker", () => {
     expect(pulses[0]).toHaveAttribute("r", "28");
   });
 
-  it("leaves the center dot, inner ring, and other stages static", () => {
+  it("keeps the outer-ring pulse off the center dot, inner ring, and other stages", () => {
     const { svg } = renderTrajectory();
 
     const pulse = svg.querySelector("[data-journey-pulse]");
@@ -165,5 +167,77 @@ describe("JourneyTrajectory live current marker", () => {
       },
       { timeout: 5000 },
     );
+  }, 8000);
+});
+
+function beaconScaleOf(element: Element | null) {
+  const match = /scale\(([\d.]+)\)/.exec(element?.getAttribute("style") ?? "");
+  return match ? Number(match[1]) : 1;
+}
+
+describe("JourneyTrajectory current marker beacon", () => {
+  it("groups exactly the current marker: inner ring, accent ring, and dot", () => {
+    const { svg } = renderTrajectory();
+
+    const beacons = svg.querySelectorAll("[data-journey-beacon]");
+    expect(beacons).toHaveLength(1);
+    const circles = [...beacons[0].querySelectorAll("circle")];
+    expect(circles.map((circle) => circle.getAttribute("r"))).toEqual([
+      "17",
+      "8",
+      "4",
+    ]);
+    for (const circle of circles) {
+      expect(circle).toHaveAttribute("cx", "600");
+    }
+    expect(beacons[0].querySelector(".fill-accent")).not.toBeNull();
+  });
+
+  it("leaves the line, other stages, outer ring, and markers out of the beacon", () => {
+    const { svg } = renderTrajectory();
+
+    const beacon = svg.querySelector("[data-journey-beacon]");
+    expect(beacon?.querySelectorAll("path, text, rect")).toHaveLength(0);
+    expect(beacon?.querySelector("[data-journey-pulse]")).toBeNull();
+    expect(beacon?.querySelector('circle:not([cx="600"])')).toBeNull();
+    expect(svg.querySelectorAll("[data-journey-pulse]")).toHaveLength(1);
+  });
+
+  it("breathes to about 1.1 and back over about 3s, easing in and out, forever", () => {
+    const transition = beaconTransition(beacon.delay);
+
+    expect(beacon.scale[0]).toBe(1);
+    expect(Math.max(...beacon.scale)).toBeCloseTo(1.1);
+    expect(Math.max(...beacon.scale)).toBeLessThanOrEqual(1.12);
+    expect(beacon.scale.at(-1)).toBe(1);
+    expect(transition).toMatchObject({
+      duration: 3,
+      ease: "easeInOut",
+      repeat: Infinity,
+    });
+    expect(beacon.duration).not.toBe(livePulse.duration);
+  });
+
+  it("renders at rest, visible, before any animation", () => {
+    const { svg } = renderTrajectory();
+
+    const group = svg.querySelector("[data-journey-beacon]");
+    expect(beaconScaleOf(group)).toBe(1);
+    expect(group).not.toHaveAttribute("data-motion-reveal");
+  });
+
+  it("starts breathing after the entrance, while in view", async () => {
+    const { svg } = renderTrajectory();
+    const group = svg.querySelector("[data-journey-beacon]");
+
+    enterViewport();
+
+    await waitFor(
+      () => {
+        expect(beaconScaleOf(group)).toBeGreaterThan(1.01);
+      },
+      { timeout: 5000 },
+    );
+    expect(beaconScaleOf(group)).toBeLessThanOrEqual(1.1);
   }, 8000);
 });
