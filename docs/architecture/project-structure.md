@@ -95,6 +95,11 @@ not override their styles). They carry no content. `buttonClassName()` gives
 a link button styling without making it a button. Class names are joined with
 `cx()` from `lib/utils/cx.ts`.
 
+`components/layout/` holds `SiteHeader` and `SiteFooter`, and
+`components/navigation/` holds `DesktopNav`, `MobileNav`, `NavLink`,
+`ThemeSwitcher`, `ResumeLink`, and `SkipLink`. They are composed once in
+`app/layout.tsx`; see "Global shell" in [`overview.md`](overview.md).
+
 Rules:
 
 - One focused component per file. No catch-all component files.
@@ -113,6 +118,8 @@ written.
 | `lib/content/`   | MDX/content loading and content utilities            |
 | `lib/seo/`       | SEO metadata and structured-data helpers             |
 | `lib/analytics/` | Analytics integration helpers                        |
+| `lib/site/`      | Site configuration (identity, navigation, links)     |
+| `lib/theme/`     | Theme preference storage and initialization          |
 | `lib/utils/`     | Small reusable utilities that don't belong elsewhere |
 
 `lib/utils/` is a last resort. Code that belongs to a domain (content, SEO,
@@ -163,13 +170,17 @@ content/
 Images that belong to a single article or case study live with that content
 in `content/`, not in `public/`.
 
+No résumé exists yet. To publish it, add the PDF to `public/resume/` and set
+`resumeHref` in `lib/site/config.ts`; the header, mobile menu, and footer
+links appear only once it is set.
+
 ## Tests
 
 | Directory           | Tests for                   | Status             |
 | ------------------- | --------------------------- | ------------------ |
 | `tests/app/`        | Routes in `app/`            | Exists (root page) |
-| `tests/components/` | Components in `components/` | Exists (`ui/`)     |
-| `tests/lib/`        | Modules in `lib/`           | Exists (`utils/`)  |
+| `tests/components/` | Components in `components/` | Exists             |
+| `tests/lib/`        | Modules in `lib/`           | Exists             |
 
 Test directories mirror the source tree: a test for
 `components/work/ProjectCard.tsx` lives at

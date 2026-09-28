@@ -24,7 +24,7 @@ for the problem being solved.
 | ------------- | ---------------------------------------------------------- | ------------------------------ |
 | App Router    | Routing, layouts, metadata. Server Components by default.  | Root layout and route in place |
 | Content       | Engineering writing and project case studies as local MDX. | MDX compilation configured     |
-| UI components | Reusable presentational components, grouped by domain.     | Core primitives in `ui/`       |
+| UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Deployment    | Production hosting on AWS.                                 | Not started                    |
 
@@ -47,11 +47,15 @@ variables are introduced only when a feature requires them; none exist today.
 What exists today:
 
 ```
-app/                 layout.tsx, page.tsx (minimal placeholder), globals.css
+app/                 layout.tsx (global shell), page.tsx (placeholder), globals.css
 components/ui/       Core UI primitives (Button, Link, Container, ...)
+components/layout/   SiteHeader, SiteFooter
+components/navigation/  Navigation, mobile menu, theme switcher, skip link
+lib/site/            config.ts (identity, nav, links), isActivePath.ts
+lib/theme/           preference.ts (theme storage and init script)
 lib/utils/           cx.ts (class-name joining)
 mdx-components.tsx   Global MDX component mapping
-tests/               setup.ts, app/, components/ui/, lib/utils/
+tests/               setup.ts, app/, components/, lib/
 docs/                architecture/, adr/
 ```
 
@@ -90,6 +94,35 @@ per page domain (`hero/`, `experience/`, `work/`, `engineering/`,
 `contact/`). One focused component per file. A component starts in the
 domain that needs it and is promoted to `ui/` only when a second domain needs
 it.
+
+## Global shell
+
+`app/layout.tsx` renders every page as
+`SkipLink → SiteHeader → <main id="main-content"> → SiteFooter`. `<body>` is a
+flex column with `min-h-dvh` and `<main>` grows, so the footer sits at the
+bottom of short pages. The shell adds no width or vertical spacing to
+`<main>`: each page chooses its own `Container` size and `Section` rhythm.
+The header is in normal document flow (not sticky).
+
+Everything is a Server Component except three small Client Components in
+`components/navigation/`: `NavLink` (reads the pathname for the active item),
+`MobileNav` (menu open state), and `ThemeSwitcher` (theme preference).
+Identity, navigation items, social links, and the résumé path live in
+`lib/site/config.ts`; components never hard-code them. A social link or the
+résumé link renders only when its URL is set.
+
+### Theme
+
+The preference (`light`, `dark`, or unset for system) is stored in
+`localStorage` under `theme`. An inline script in `<head>`
+(`themeInitScript` in `lib/theme/preference.ts`) sets `data-theme` on `<html>`
+before first paint, so a stored preference never flashes the wrong theme;
+with no preference, the CSS follows the OS through `color-scheme` and no
+script work is needed. `<html>` has `suppressHydrationWarning` because the
+script changes its attributes before hydration. Reading a cookie on the
+server was rejected because it would make every page dynamic. The switcher
+subscribes to the same store with `useSyncExternalStore`, which keeps its
+instances and other tabs in sync.
 
 ## Content organization
 

@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
 import type { ReactNode } from "react";
+import { SiteFooter } from "@/components/layout/SiteFooter";
+import { SiteHeader } from "@/components/layout/SiteHeader";
+import { MAIN_CONTENT_ID, SkipLink } from "@/components/navigation/SkipLink";
+import { themeInitScript } from "@/lib/theme/preference";
 import "./globals.css";
 
 /*
@@ -36,11 +40,27 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
+    // The <head> script may set `data-theme` before hydration.
     <html
       lang="en"
       className={`${sans.variable} ${serif.variable} ${mono.variable}`}
+      suppressHydrationWarning
     >
-      <body>{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="flex min-h-dvh flex-col">
+        <SkipLink />
+        <SiteHeader />
+        <main
+          id={MAIN_CONTENT_ID}
+          tabIndex={-1}
+          className="flex-1 outline-none"
+        >
+          {children}
+        </main>
+        <SiteFooter />
+      </body>
     </html>
   );
 }

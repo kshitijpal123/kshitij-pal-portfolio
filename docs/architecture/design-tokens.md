@@ -60,7 +60,8 @@ single switch:
 - Forced: `data-theme="light"` or `data-theme="dark"` on `<html>` sets
   `color-scheme` and every token follows.
 
-A future theme switcher only needs to set that attribute. The `dark:` variant
+The theme switcher only sets that attribute (see "Global shell" in
+[`overview.md`](overview.md)). The `dark:` variant
 is redefined to match the same rules, but theme differences belong in tokens;
 components should not need `dark:`.
 

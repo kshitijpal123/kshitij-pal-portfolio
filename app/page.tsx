@@ -1,7 +1,9 @@
+import { Container } from "@/components/ui/Container";
+
 export default function HomePage() {
   return (
-    <main>
+    <Container className="py-section">
       <h1>Under development</h1>
-    </main>
+    </Container>
   );
 }

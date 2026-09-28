@@ -1,0 +1,44 @@
+export type NavItem = {
+  label: string;
+  href: string;
+};
+
+export type SocialLink = {
+  label: string;
+  /** `null` until a real profile URL exists; unset links are not rendered. */
+  href: string | null;
+};
+
+type SiteConfig = {
+  name: string;
+  role: string;
+  /**
+   * Path of the résumé PDF in `public/resume/`, for example
+   * `/resume/kshitij-pal-resume.pdf`. `null` until the file exists; every
+   * résumé link is hidden while it is unset.
+   */
+  resumeHref: string | null;
+  nav: readonly NavItem[];
+  social: readonly SocialLink[];
+};
+
+export const siteConfig: SiteConfig = {
+  name: "Kshitij Pal",
+  role: "Backend Engineer",
+  resumeHref: null,
+  nav: [
+    { label: "Home", href: "/" },
+    { label: "Work", href: "/work" },
+    { label: "Engineering", href: "/engineering" },
+    { label: "Experience", href: "/experience" },
+    { label: "About", href: "/about" },
+    { label: "Contact", href: "/contact" },
+  ],
+  social: [
+    { label: "GitHub", href: "https://github.com/kshitijpal123" },
+    {
+      label: "LinkedIn",
+      href: "https://www.linkedin.com/in/kshitij-pal-963247195",
+    },
+  ],
+};
