@@ -28,7 +28,7 @@ Project code lives outside `app/`. `app/` contains only routing files
 ## Routes
 
 Exists: `/` (`app/page.tsx`), the Home page. It currently renders the hero
-only.
+followed by the Experience section.
 
 Intended route map (not implemented; routes are added when their content
 exists):
@@ -105,6 +105,12 @@ a link button styling without making it a button. Class names are joined with
 `components/hero/` holds `HomeHero`, the Home page hero. It uses no motion
 primitives: it is above the fold and must render fully without JavaScript.
 
+`components/experience/` holds `ExperienceSection`, the Home page
+professional timeline. It renders the typed entries in `lib/site/experience.ts`
+(most recent first) and reveals them with the motion primitives, since it sits
+below the fold. Entries are structured data, not MDX. A role's `period` is set
+only from verified dates and is not rendered while unset.
+
 `components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
 internal `MotionScope`. They are thin Client Components that accept Server
 Component children; see [`motion.md`](motion.md).
@@ -127,7 +133,7 @@ written.
 | `lib/content/`   | MDX/content loading and content utilities            |
 | `lib/seo/`       | SEO metadata and structured-data helpers             |
 | `lib/analytics/` | Analytics integration helpers                        |
-| `lib/site/`      | Site configuration (identity, navigation, links)     |
+| `lib/site/`      | Site configuration and structured data (experience)  |
 | `lib/theme/`     | Theme preference storage and initialization          |
 | `lib/motion/`    | Motion tokens and shared Motion for React variants   |
 | `lib/utils/`     | Small reusable utilities that don't belong elsewhere |

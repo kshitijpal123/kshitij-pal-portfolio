@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ExperienceSection } from "@/components/experience/ExperienceSection";
 import { HomeHero } from "@/components/hero/HomeHero";
 import { siteConfig } from "@/lib/site/config";
 
@@ -9,5 +10,10 @@ export const metadata: Metadata = {
 };
 
 export default function HomePage() {
-  return <HomeHero />;
+  return (
+    <>
+      <HomeHero />
+      <ExperienceSection />
+    </>
+  );
 }

@@ -51,10 +51,12 @@ What exists today:
 app/                 layout.tsx (global shell), page.tsx (Home), globals.css
 components/ui/       Core UI primitives (Button, Link, Container, ...)
 components/hero/     HomeHero
+components/experience/  ExperienceSection
 components/layout/   SiteHeader, SiteFooter
 components/navigation/  Navigation, mobile menu, theme switcher, skip link
 components/motion/   Reveal, Stagger, StaggerItem, MotionScope
-lib/site/            config.ts (identity, nav, links), isActivePath.ts
+lib/site/            config.ts (identity, nav, links), experience.ts,
+                     isActivePath.ts
 lib/theme/           preference.ts (theme storage and init script)
 lib/motion/          tokens.ts, variants.ts (Motion for React values)
 lib/utils/           cx.ts (class-name joining)

@@ -1,7 +1,9 @@
 # Motion
 
 Status: Milestone 2.5 (motion language). This document defines how things
-move and the primitives that implement it. No page uses the primitives yet.
+move and the primitives that implement it. The Home page Experience section
+is the first to use them: a `Reveal` for its heading and a `Stagger` over its
+entries. Responsibility bullets are not staggered individually.
 
 ## Principle
 
