@@ -47,12 +47,14 @@ jobs:
     env:
       STACK_NAME: portfolio-production
       AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      AWS_CLOUDFORMATION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}
+      AWS_ARTIFACTS_BUCKET: ${{ vars.AWS_ARTIFACTS_BUCKET }}
+      CONTACT_TO_EMAIL: ${{ vars.CONTACT_TO_EMAIL }}
+      CONTACT_FROM_EMAIL: ${{ vars.CONTACT_FROM_EMAIL }}
+      SITE_URL: ${{ vars.SITE_URL }}
     steps:
       - name: Check deployment configuration
-        env:
-          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          AWS_CLOUDFORMATION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}
-          AWS_ARTIFACTS_BUCKET: ${{ vars.AWS_ARTIFACTS_BUCKET }}
         run: |
           missing=0
           for name in AWS_REGION AWS_DEPLOY_ROLE_ARN AWS_CLOUDFORMATION_ROLE_ARN AWS_ARTIFACTS_BUCKET; do
@@ -74,16 +76,14 @@ jobs:
 
       - name: Build
         run: npm run build
-        env:
-          SITE_URL: ${{ vars.SITE_URL }}
 
       - name: Assemble Lambda package
         run: node infra/package-server.mts
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # Assets go up before the new server so fresh HTML never references a
       # missing file. Old hashed files are kept for pages still cached.
@@ -103,20 +103,18 @@ jobs:
         run: |
           aws cloudformation package \
             --template-file infra/portfolio.yaml \
-            --s3-bucket "${{ vars.AWS_ARTIFACTS_BUCKET }}" \
+            --s3-bucket "$AWS_ARTIFACTS_BUCKET" \
             --s3-prefix "$STACK_NAME" \
             --output-template-file .aws-build/portfolio.packaged.yaml
 
       - name: Deploy stack
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          CONTACT_TO_EMAIL: ${{ vars.CONTACT_TO_EMAIL }}
-          CONTACT_FROM_EMAIL: ${{ vars.CONTACT_FROM_EMAIL }}
         run: |
           aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
             --template-file .aws-build/portfolio.packaged.yaml \
-            --role-arn "${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}" \
+            --role-arn "$AWS_CLOUDFORMATION_ROLE_ARN" \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
@@ -163,6 +161,6 @@ jobs:
           check GET /sitemap.xml 200
           check GET /api/contact 405
           check GET /this-page-does-not-exist 404
-          if [ -z "${{ vars.SITE_URL }}" ]; then
+          if [ -z "$SITE_URL" ]; then
             echo "::warning::SITE_URL is not set, so canonical URLs and sitemap entries are omitted. Set it to $URL and redeploy."
           fi
