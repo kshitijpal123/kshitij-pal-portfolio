@@ -139,7 +139,10 @@ Deferred, deliberately:
 
 - There are no AWS access keys anywhere. The deploy job exchanges its GitHub
   OIDC token for a one-hour session on `github-deploy-portfolio-production`.
-  The role trusts only `repo:<owner>/<repo>:environment:production`.
+  The role trusts only
+  `repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:production`, GitHub's
+  immutable subject format, so a recreated or recycled repository name
+  cannot assume it.
 - `RESEND_API_KEY` travels from the GitHub secret, through a
   `NoEcho` CloudFormation parameter, into the Lambda environment. There
   Lambda encrypts it at rest. GitHub masks it in logs, and CloudFormation
@@ -178,15 +181,21 @@ access to the GitHub repository. Requires the AWS CLI v2.
 2. **Create the bootstrap stack.** It holds the OIDC provider (skip creating
    one with `ExistingOidcProviderArn=<arn>` if the account already has one
    for `token.actions.githubusercontent.com`), the two roles, the
-   permissions boundary, and the artifacts bucket.
+   permissions boundary, and the artifacts bucket. The numeric IDs come from
+   the subject prefix GitHub reports for the repository
+   (`repo:<owner>@<owner-id>/<repo>@<repo-id>`):
 
    ```bash
+   gh api repos/<owner>/<repo>/actions/oidc/customization/sub \
+     --jq .sub_claim_prefix
+
    aws cloudformation deploy \
      --region ap-south-1 \
      --stack-name portfolio-bootstrap \
      --template-file infra/bootstrap.yaml \
      --capabilities CAPABILITY_NAMED_IAM \
-     --parameter-overrides GitHubOwner=<owner> GitHubRepository=<repo>
+     --parameter-overrides GitHubOwner=<owner> GitHubOwnerId=<owner-id> \
+       GitHubRepository=<repo> GitHubRepositoryId=<repo-id>
 
    aws cloudformation describe-stacks --region ap-south-1 \
      --stack-name portfolio-bootstrap --query "Stacks[0].Outputs"
@@ -319,7 +328,7 @@ the same pipeline, is the release record.
 | Symptom                                                   | Likely cause and fix                                                                                                                |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | "Variable … is not set on the production environment"     | Step 3 of the setup is incomplete                                                                                                   |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The owner, repository, or environment name differs from the bootstrap parameters; update the bootstrap stack                        |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The owner, repository, IDs, or environment name differ from the bootstrap parameters; update the bootstrap stack                    |
 | CloudFormation `AccessDenied` for some action             | The CloudFormation role lacks it. Add the narrowest action to `infra/bootstrap.yaml` and redeploy the bootstrap stack               |
 | CloudFront 502 or 503                                     | The server did not start. Read `/aws/lambda/portfolio-production-server` (a missing exec bit on `run.sh` or a crash in `server.js`) |
 | `{"Message":"Forbidden"}` from the function URL           | A function URL permission is missing; both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` are required                      |

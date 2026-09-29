@@ -10,10 +10,18 @@ Parameters:
     Type: String
     Description: GitHub user or organization that owns the repository.
     AllowedPattern: "[A-Za-z0-9-]+"
+  GitHubOwnerId:
+    Type: String
+    Description: Numeric ID of the repository owner, part of GitHub's immutable OIDC subject.
+    AllowedPattern: "[0-9]+"
   GitHubRepository:
     Type: String
     Description: Repository name, without the owner.
     AllowedPattern: "[A-Za-z0-9._-]+"
+  GitHubRepositoryId:
+    Type: String
+    Description: Numeric ID of the repository, part of GitHub's immutable OIDC subject.
+    AllowedPattern: "[0-9]+"
   GitHubEnvironment:
     Type: String
     Description: GitHub environment whose deploy jobs may assume the deploy role.
@@ -241,7 +249,7 @@ Resources:
             Condition:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
-                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOwner}/${GitHubRepository}:environment:${GitHubEnvironment}"
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:${GitHubEnvironment}"
       Policies:
         - PolicyName: deploy-application
           PolicyDocument:
