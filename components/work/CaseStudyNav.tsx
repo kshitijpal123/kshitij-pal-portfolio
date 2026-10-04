@@ -12,8 +12,8 @@ export function CaseStudyNav() {
     >
       <Container className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <NextLink href="/work" className={buttonClassName("secondary")}>
+          <span aria-hidden="true">←</span>
           Back to Work
-          <span aria-hidden="true">→</span>
         </NextLink>
         <Link
           href="/contact"

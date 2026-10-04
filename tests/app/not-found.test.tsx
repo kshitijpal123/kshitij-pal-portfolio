@@ -11,6 +11,11 @@ describe("NotFound", () => {
     expect(
       screen.getByRole("region", { name: "Page not found" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The address may be mistyped, or the page may have moved.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Home" })).toHaveAttribute(
       "href",
       "/",

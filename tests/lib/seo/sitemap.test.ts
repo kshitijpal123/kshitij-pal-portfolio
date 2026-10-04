@@ -13,8 +13,8 @@ describe("buildSitemap (repository content)", () => {
     expect(urls).toEqual([
       "https://portfolio.test/",
       "https://portfolio.test/work",
-      "https://portfolio.test/engineering",
       "https://portfolio.test/experience",
+      "https://portfolio.test/engineering",
       "https://portfolio.test/about",
       "https://portfolio.test/contact",
       "https://portfolio.test/work/billsync",

@@ -92,7 +92,7 @@ describe("route metadata", { timeout: 30_000 }, () => {
     expect(titles).toEqual([
       "Kshitij Pal · Backend Engineer",
       "Work · Kshitij Pal",
-      "BillSync · AI-Powered Inventory Engineering Case Study · Kshitij Pal",
+      "BillSync Case Study · Kshitij Pal",
       "Engineering · Kshitij Pal",
       "Why AI extraction should not become your source of truth · Kshitij Pal",
       "Experience · Kshitij Pal",

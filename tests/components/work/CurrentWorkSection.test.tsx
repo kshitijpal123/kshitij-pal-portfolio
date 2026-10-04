@@ -69,7 +69,7 @@ describe("CurrentWorkSection", () => {
   it("links to the BillSync case study", () => {
     render(<CurrentWorkSection />);
 
-    const link = screen.getByRole("link", { name: "View project" });
+    const link = screen.getByRole("link", { name: "Explore BillSync" });
     expect(link).toHaveAttribute("href", "/work/billsync");
     expect(link).toHaveAccessibleDescription("BillSync");
   });

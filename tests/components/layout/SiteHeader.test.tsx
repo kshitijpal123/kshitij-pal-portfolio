@@ -32,8 +32,8 @@ describe("SiteHeader", () => {
     ).toEqual([
       ["Home", "/"],
       ["Work", "/work"],
-      ["Engineering", "/engineering"],
       ["Experience", "/experience"],
+      ["Engineering", "/engineering"],
       ["About", "/about"],
       ["Contact", "/contact"],
     ]);

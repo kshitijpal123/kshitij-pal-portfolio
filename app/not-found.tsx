@@ -23,7 +23,7 @@ export default function NotFound() {
           Page not found
         </h1>
         <p className="mt-6 max-w-measure text-body-lg text-muted-foreground">
-          This page could not be found.
+          The address may be mistyped, or the page may have moved.
         </p>
         <div className="mt-10">
           <NextLink href="/" className={buttonClassName("secondary")}>

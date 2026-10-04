@@ -30,7 +30,7 @@ export const billsync: ProjectDefinition = {
     "Supplier purchase bills carry the information inventory depends on, but a document is not structured data, and a machine's reading of it is not yet something a business can trust.",
   solution:
     "A pipeline that keeps the original document, the AI extraction, and human-verified business data as separate stages, so only reviewed data updates inventory and every step leaves history.",
-  metaTitle: "BillSync · AI-Powered Inventory Engineering Case Study",
+  metaTitle: "BillSync Case Study",
   featured: true,
   CaseStudy,
 };

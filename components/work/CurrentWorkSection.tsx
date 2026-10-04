@@ -81,7 +81,7 @@ function CurrentWorkDetails({ item, headingId }: CurrentWorkDetailsProps) {
               aria-describedby={headingId}
               className="inline-flex min-h-11 items-center font-medium"
             >
-              View project
+              Explore {item.name}
               <span aria-hidden="true" className="ml-1.5">
                 →
               </span>

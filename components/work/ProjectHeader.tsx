@@ -23,7 +23,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
         <div className="lg:col-span-2">
           <p className="flex items-center gap-3 font-mono text-meta text-muted-foreground uppercase">
             <span aria-hidden="true" className="h-px w-6 bg-border-strong" />
-            {project.type} · {project.status}
+            {project.type}
           </p>
           <h1
             id="project-heading"

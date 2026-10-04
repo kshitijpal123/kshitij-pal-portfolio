@@ -1,8 +1,8 @@
 # Architecture Overview
 
-Status: live at https://kshitijpal.in after production hardening
-(Milestone 11), the AWS deployment (Milestone 9), SEO, accessibility, and
-performance hardening (Milestone 8), the contact page and form delivery
+Status: live at https://kshitijpal.in after final content and UX polish
+(Milestone 12), production hardening (Milestone 11), the AWS deployment
+(Milestone 9), SEO, accessibility, and performance hardening (Milestone 8), the contact page and form delivery
 (Milestone 7), and the evolved Experience journey (Milestone 6.5). This
 document
 describes the intended shape of the system and what exists today. It is

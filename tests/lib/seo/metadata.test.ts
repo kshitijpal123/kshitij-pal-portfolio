@@ -103,9 +103,7 @@ describe("projectMetadata", () => {
     if (!billsync) throw new Error("BillSync is not registered.");
 
     const metadata = projectMetadata(billsync, base);
-    expect(metadata.title).toBe(
-      "BillSync · AI-Powered Inventory Engineering Case Study",
-    );
+    expect(metadata.title).toBe("BillSync Case Study");
     expect(metadata.description).toBe(
       `${billsync.summary} Currently being developed.`,
     );

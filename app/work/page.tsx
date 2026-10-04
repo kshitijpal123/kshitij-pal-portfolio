@@ -21,9 +21,13 @@ export default function WorkPage() {
         className="pb-section"
       >
         <Container>
+          <p className="flex items-center gap-3 font-mono text-meta text-muted-foreground uppercase">
+            <span aria-hidden="true" className="h-px w-6 bg-border-strong" />
+            Work
+          </p>
           <h1
             id="work-heading"
-            className="font-serif text-h1 font-semibold sm:text-display"
+            className="mt-6 font-serif text-h1 font-semibold sm:text-display"
           >
             Work
           </h1>

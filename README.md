@@ -37,9 +37,69 @@ Next.js → App Router → Local MDX content → Reusable UI components → AWS 
 ```
 
 Pages are Server Components by default; Client Components are used only where
-browser interactivity requires them. See
+browser interactivity requires them: the contact form, navigation state
+(active link, mobile menu, theme switcher), and the scroll-reveal motion
+primitives. Every page is prerendered at build time; `POST /api/contact` is
+the only request-time code. See
 [`docs/architecture/overview.md`](docs/architecture/overview.md) and the
 decision records in [`docs/adr/`](docs/adr/).
+
+```
+Browser → CloudFront ─┬─ /_next/static/*  → S3 (private, immutable assets)
+                      └─ everything else  → Lambda function URL
+                                             → Next.js standalone server
+```
+
+## Content
+
+Content lives in the repository and is reviewed like code
+([ADR 0001](docs/adr/0001-local-mdx-content.md)):
+
+- **Case studies:** `content/projects/<slug>/` — typed metadata in
+  `project.ts`, the body in `index.mdx`. BillSync is the only project.
+- **Articles:** `content/engineering/<slug>/` — the same split, plus a
+  `published`/`draft` status. Drafts are never listed, routed, prerendered,
+  or added to the sitemap.
+- **Experience:** `lib/site/experience.ts` is the single source, rendered
+  oldest first on Home and newest first on `/experience`.
+- **Identity and links:** name, navigation, contact details, social links,
+  and the optional résumé and portrait live in `lib/site/config.ts`;
+  components never hard-code them.
+
+Metadata is in TypeScript rather than MDX exports so the compiler checks it.
+
+## Accessibility, performance, and SEO
+
+- One h1 per page, labelled landmarks, a skip link, `aria-current` on the
+  active route, and a mobile menu that closes on Escape and returns focus.
+- Motion never carries content; reduced motion removes movement.
+- Self-hosted fonts through `next/font`; only the body face is preloaded.
+- Canonical URLs, the sitemap, and robots come from `SITE_URL` at build time;
+  JSON-LD states only facts the site itself shows.
+
+Details: [`docs/architecture/seo-accessibility-performance.md`](docs/architecture/seo-accessibility-performance.md).
+
+## Testing
+
+Vitest with React Testing Library and jsdom, mirroring the source tree under
+`tests/`. Tests render the real MDX content, check routing and metadata for
+every route, pin the list of Client Components, validate the contact route
+(with Resend mocked; no test makes a network call), and check the security
+headers against their CloudFront copy. CI runs formatting, lint, typecheck,
+tests, and a production build on every push and pull request.
+
+## Trade-offs and known gaps
+
+- **Lambda behind CloudFront instead of a container or Amplify:** no
+  always-on compute, at the cost of cold starts on uncached requests. The
+  reasoning is in [ADR 0002](docs/adr/0002-aws-lambda-cloudfront-hosting.md).
+- **Contact rate limiting is per Lambda instance**, a light baseline rather
+  than a distributed control.
+- **No Content Security Policy yet:** the inline theme script and JSON-LD
+  would need hashes or nonces.
+- **No favicon, Open Graph image, résumé, or portrait yet.** None is
+  referenced until a real asset exists; browsers' automatic `/favicon.ico`
+  request returns 404 until then.
 
 ## Development
 

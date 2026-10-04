@@ -61,8 +61,8 @@ describe("ProjectPage (BillSync)", { timeout: 20_000 }, () => {
       "Multi-tenancy",
       "Data integrity and auditability",
       "Development foundation",
-      "Engineering Decisions",
-      "Current Status",
+      "Engineering decisions",
+      "Current status",
       "What's next",
     ]);
   });
@@ -71,9 +71,8 @@ describe("ProjectPage (BillSync)", { timeout: 20_000 }, () => {
     await renderBillSync();
 
     const hero = section("BillSync");
-    expect(
-      hero.getByText("Personal project · Currently being developed"),
-    ).toBeInTheDocument();
+    expect(hero.getByText("Personal project")).toBeInTheDocument();
+    expect(hero.getAllByText("Currently being developed")).toHaveLength(1);
     expect(hero.getByRole("list", { name: "Focus" })).toHaveTextContent(
       /AI document processing.*Inventory.*Multi-tenancy.*Backend systems/,
     );
@@ -165,7 +164,7 @@ describe("ProjectPage (BillSync)", { timeout: 20_000 }, () => {
   it("renders the engineering decisions, each with a rationale", async () => {
     await renderBillSync();
 
-    const decisions = section("Engineering Decisions");
+    const decisions = section("Engineering decisions");
     const headings = decisions.getAllByRole("heading", { level: 3 });
     expect(headings).toHaveLength(7);
     expect(headings[0]).toHaveTextContent(
@@ -177,7 +176,7 @@ describe("ProjectPage (BillSync)", { timeout: 20_000 }, () => {
   it("separates established work, current direction, and planned next", async () => {
     await renderBillSync();
 
-    const status = section("Current Status");
+    const status = section("Current status");
     expect(
       status.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
     ).toEqual(["Established", "Current direction", "Planned next"]);
@@ -225,9 +224,7 @@ describe("ProjectPage routing", () => {
 
   it("defines the case-study title and description", async () => {
     const metadata = await generateMetadata(props("billsync"));
-    expect(metadata.title).toBe(
-      "BillSync · AI-Powered Inventory Engineering Case Study",
-    );
+    expect(metadata.title).toBe("BillSync Case Study");
     expect(metadata.description).toEqual(expect.any(String));
   });
 });
