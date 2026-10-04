@@ -2,9 +2,8 @@
 
 Source for my personal Backend Engineer portfolio.
 
-> **Status:** every page is built. AWS deployment infrastructure and the
-> GitHub Actions deploy job exist; the first production deployment is pending
-> the one-time AWS setup in
+> **Status:** live at [kshitijpal.in](https://kshitijpal.in), deployed to AWS
+> by GitHub Actions on every push to `main`. See
 > [`docs/architecture/deployment.md`](docs/architecture/deployment.md).
 
 ## Purpose
@@ -69,10 +68,10 @@ delivery needs them: copy `.env.example` to `.env.local` (git-ignored) and set
 the form responds with a generic error and sends nothing. Details: "Contact
 form" in [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
-`SITE_URL`, the canonical origin (for example `https://domain.tld`), is read
-at build time. While it is unset, canonical URLs, sitemap entries, and other
-absolute URLs are omitted. Set it in the production build once the domain
-exists; see
+`SITE_URL`, the canonical origin, is read at build time. Leave it unset
+locally: canonical URLs, sitemap entries, and other absolute URLs are then
+omitted. Production builds set it to `https://kshitijpal.in` from the GitHub
+`production` environment; see
 [`docs/architecture/seo-accessibility-performance.md`](docs/architecture/seo-accessibility-performance.md).
 
 ## Production deployment
@@ -89,9 +88,9 @@ domain, rollback, and troubleshooting:
 
 ```
 app/                 Routes, layouts, global styles
-components/          Reusable UI, grouped by domain            (planned)
-content/             MDX sources: engineering/, projects/       (planned)
-lib/                 Non-UI modules: content, seo, analytics    (planned)
+components/          Reusable UI, grouped by domain
+content/             MDX sources: engineering/, projects/, about/
+lib/                 Non-UI modules: content, contact, seo, site, theme, motion
 public/              Static assets: images, resume, icons       (planned)
 tests/               Vitest + React Testing Library tests
 docs/architecture/   Architecture documentation

@@ -1,21 +1,21 @@
 # Production Deployment (AWS)
 
-Status: Milestone 9. The infrastructure, packaging, and GitHub Actions
-deployment are implemented. **The site has not been deployed yet.** No AWS
-account credentials were available when this was written, so the one-time
-AWS and GitHub setup below is still to be done. Nothing here names a
-production URL, because none exists until the first deployment creates one.
+Status: Milestone 11. The site is live at **https://kshitijpal.in**, the
+canonical origin, served by the stacks in `infra/` and deployed by GitHub
+Actions on every push to `main`. The distribution's default
+`*.cloudfront.net` hostname still serves the same site; it is not canonical
+(see "Custom domain").
 
 Why this architecture: [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 
 ## Architecture
 
 ```
-                         Browser (HTTPS)
-                               │
+                 Browser → https://kshitijpal.in
+                               │  Route 53: alias A record
                                ▼
               ┌──────────────────────────────────┐
-              │ Amazon CloudFront                │  default *.cloudfront.net certificate
+              │ Amazon CloudFront                │  ACM certificate (us-east-1)
               │  /_next/static/*  → S3 (cached)   │  HTTP → HTTPS redirect, HTTP/2 and 3
               │  everything else  → Lambda        │  caches by origin Cache-Control
               └───────┬──────────────────┬───────┘
@@ -41,10 +41,12 @@ Why this architecture: [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 | IAM             | Roles and a permissions boundary              | OIDC deploy role, CloudFormation role, Lambda role            |
 | CloudFormation  | `portfolio-bootstrap`, `portfolio-production` | Everything above, as code                                     |
 
-Nothing else: no API Gateway, load balancer, container, database, queue,
-WAF, or DNS. The region is chosen with the `AWS_REGION` variable;
-`ap-south-1` (Mumbai) is the recommended default. CloudFront is global and
-uses `PriceClass_200`, which includes edge locations in India.
+Outside the templates, managed by hand: the Route 53 hosted zone for
+`kshitijpal.in`, the ACM certificate, and the distribution's alias (see
+"Custom domain"). Nothing else: no API Gateway, load balancer, container,
+database, queue, or WAF. Production runs in `ap-south-1` (Mumbai), chosen
+with the `AWS_REGION` variable. CloudFront is global and uses
+`PriceClass_200`, which includes edge locations in India.
 
 ### Runtime
 
@@ -110,21 +112,29 @@ cd .aws-build/server && PORT=8000 node server.js
 
 ## Security headers
 
-`next.config.ts` sets `X-Content-Type-Options: nosniff`,
+`next.config.ts` sets `Strict-Transport-Security: max-age=31536000`,
+`X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, and
 `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and
 disables `X-Powered-By`. Those reach every response from Lambda.
 `/_next/static/*` comes from S3, so the `StaticAssetsHeadersPolicy`
-response headers policy in `infra/portfolio.yaml` adds the same three
-headers there. Keep the two lists in step.
+response headers policy in `infra/portfolio.yaml` adds the same four
+headers there. Keep the two lists in step; `tests/next.config.test.ts`
+fails if they drift.
 
-Deferred, deliberately:
+HSTS has no `includeSubDomains` or `preload`: both would commit hostnames
+this site does not serve, and preload is hard to undo. CloudFront also
+redirects every HTTP request to HTTPS (301).
 
-- **Content Security Policy.** The inline theme script and JSON-LD need
-  hashes or nonces. A nonce makes every page dynamic, and hashes need a
-  build step. Neither can be verified safely without a live deployment.
-- **HSTS.** It is better set once the custom domain exists. On
-  `*.cloudfront.net`, CloudFront already redirects HTTP to HTTPS.
+Deferred, deliberately: a **Content Security Policy**. The inline theme
+script (`themeInitScript`) and the JSON-LD scripts need hashes or nonces.
+A nonce makes every page dynamic, which removes edge caching of prerendered
+pages, and hashes would need a build step that rewrites the policy whenever
+the theme script or any structured data changes. A policy without them
+would need `'unsafe-inline'` for scripts, which adds little. The site loads
+no third-party script, frame, or font (fonts are self-hosted through
+`next/font`), so the practical exposure a CSP would reduce is small today.
+Revisit it when analytics or monitoring adds third-party scripts.
 
 ## Secrets and environment variables
 
@@ -172,11 +182,13 @@ Deferred, deliberately:
 
 ## One-time setup
 
-Done once, by someone with administrator access to the AWS account and admin
-access to the GitHub repository. Requires the AWS CLI v2.
+Production has been set up this way. The steps are kept for rebuilding it,
+for example in a new account. They need someone with administrator access
+to the AWS account and admin access to the GitHub repository, and the AWS
+CLI v2.
 
-1. **Push the repository to GitHub.** The trust policy names the repository,
-   and this repository has no remote yet.
+1. **The repository is on GitHub.** The trust policy names it by owner and
+   repository, with their numeric IDs.
 
 2. **Create the bootstrap stack.** It holds the OIDC provider (skip creating
    one with `ExistingOidcProviderArn=<arn>` if the account already has one
@@ -212,24 +224,22 @@ access to the GitHub repository. Requires the AWS CLI v2.
    | `AWS_ARTIFACTS_BUCKET`        | Bootstrap output `ArtifactsBucketName`   |
    | `CONTACT_TO_EMAIL`            | The inbox that receives messages         |
    | `CONTACT_FROM_EMAIL`          | A sender on a Resend-verified domain     |
-   | `SITE_URL`                    | Leave unset until step 5                 |
+   | `SITE_URL`                    | `https://kshitijpal.in`                  |
 
    and the secret `RESEND_API_KEY`. The same can be done with `gh variable
 set <name> --env production` and `gh secret set RESEND_API_KEY --env
-production`.
+production`. The deploy job fails before building if `SITE_URL` is unset
+   or is not a bare `https://` origin.
 
 4. **First deployment.** Push to `main`. The deploy job creates the
    `portfolio-production` stack, which takes a few minutes because of the
-   CloudFront distribution. It then uploads assets, invalidates, and runs
-   the smoke test. With `SITE_URL` unset, the site works, but canonical URLs,
-   `og:url`, sitemap entries, and the robots `Sitemap:` line are omitted,
-   and the job warns about it.
+   CloudFront distribution. It then uploads assets and invalidates. The
+   smoke test runs against `SITE_URL`, so on a brand-new stack it fails until
+   the custom domain points at the new distribution (step 5); the stack
+   itself is complete by then.
 
-5. **Set `SITE_URL`.** Copy the stack output `SiteUrl`
-   (`https://<id>.cloudfront.net`, also printed in the job's smoke test
-   warning) into the `SITE_URL` variable. Then re-run the workflow, or push
-   again. That build bakes the real origin into every page, the sitemap,
-   robots, and the structured data.
+5. **Attach the custom domain** as described in "Custom domain", then
+   re-run the workflow.
 
 ## GitHub Actions
 
@@ -249,10 +259,13 @@ check variables → npm ci → next build (SITE_URL) → assemble Lambda package
 
 Any failing step fails the workflow, so a broken build never deploys. If
 CloudFormation fails, it rolls the stack back to the last good state. The
-smoke test requests `/`, `/work/billsync`, `/robots.txt`, and
-`/sitemap.xml` (expecting 200), `GET /api/contact` (405), and an unknown
-path (404) through CloudFront. Deployments never run concurrently, and a
-newer push to `main` does not cancel one in progress.
+smoke test runs against `SITE_URL`, the public origin: `/`,
+`/work/billsync`, `/robots.txt`, and `/sitemap.xml` (expecting 200),
+`GET /api/contact` (405), and an unknown path (404). It also checks that
+robots.txt lists `$SITE_URL/sitemap.xml`, which proves the build baked in
+the right origin, and that the distribution's default hostname still
+answers 200. Deployments never run concurrently, and a newer push to `main`
+does not cancel one in progress.
 
 The same steps can run by hand from a machine with credentials for the
 deploy role. The workflow file is the reference.
@@ -293,21 +306,48 @@ build rather than publishing wrong URLs.
 Update the `RESEND_API_KEY` secret, then re-run the latest workflow. The
 deploy step passes the new value to the Lambda configuration.
 
-## Custom domain (later)
+## Custom domain
 
-The application needs no change. Only infrastructure and one variable do:
+`https://kshitijpal.in` is the canonical origin. Its state:
 
-1. Request an ACM certificate for the domain in **us-east-1** (CloudFront
-   only uses certificates from that region) and validate it through DNS.
-2. Add `Aliases: [<domain>]` and a `ViewerCertificate` with
-   `AcmCertificateArn`, `SslSupportMethod: sni-only`, and
-   `MinimumProtocolVersion: TLSv1.2_2021` to the distribution in
-   `infra/portfolio.yaml`, as template parameters.
-3. Point the domain at the distribution: a Route 53 alias record, or a
-   CNAME at another DNS provider.
-4. Set `SITE_URL` to `https://<domain>` and deploy.
-5. Optionally, redirect the `*.cloudfront.net` hostname to the domain, and
-   add HSTS.
+| Part             | State                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| DNS              | Route 53 hosted zone; the apex is an alias to the distribution                                       |
+| Certificate      | ACM (Amazon-issued), covering `kshitijpal.in` and `*.kshitijpal.in`; CloudFront requires `us-east-1` |
+| Distribution     | `kshitijpal.in` is an alternate domain name of the `portfolio-production` distribution               |
+| HTTP             | `http://kshitijpal.in` redirects to `https://kshitijpal.in/` (301)                                   |
+| `www`            | Not configured: `www.kshitijpal.in` has no DNS record                                                |
+| Default hostname | `https://<id>.cloudfront.net` serves the same pages; their canonical URLs point to `kshitijpal.in`   |
+| Application      | Only `SITE_URL=https://kshitijpal.in`; no code names the domain                                      |
+
+**The alias and certificate are not in `infra/portfolio.yaml`.** They were
+attached to the distribution outside CloudFormation. Deploys that leave the
+`Distribution` resource unchanged keep them (CloudFormation only updates
+resources whose template changed), but any change to that resource makes
+CloudFormation send the template's distribution config, which has no alias
+and the default certificate, and the custom domain stops working. Before
+changing the distribution, bring the domain into the template:
+
+1. Add `AcmCertificateArn` and `DomainName` parameters to
+   `infra/portfolio.yaml`, and on the distribution set
+   `Aliases: [!Ref DomainName]` and a `ViewerCertificate` with
+   `AcmCertificateArn`, `SslSupportMethod: sni-only`, and the
+   `MinimumProtocolVersion` the distribution uses today.
+2. Allow `acm:DescribeCertificate` and `acm:ListCertificates` on the
+   CloudFormation execution role in `infra/bootstrap.yaml`, and update the
+   bootstrap stack. CloudFront checks the certificate with the caller's
+   permissions.
+3. Pass the two values from new `production` environment variables in the
+   deploy job's `cloudformation deploy` step.
+4. Compare the console's alternate domain names and certificate with the
+   template values before pushing, so the first update changes nothing.
+
+The default `*.cloudfront.net` hostname is not redirected. Its pages
+declare `kshitijpal.in` as canonical, so search engines consolidate on the
+custom domain; a redirect would need a CloudFront Function and is not worth
+it while nothing links to that hostname. To serve `www`, add it as an
+alternate domain name (the certificate already covers it) with a Route 53
+alias, and redirect it to the apex rather than serving duplicate pages.
 
 ## Rollback
 
@@ -352,7 +392,7 @@ the templates.
 
 - **Direct function URL access.** The function URL is public
   (`AuthType: NONE`; see ADR 0002) and serves the same site without
-  CloudFront caching. Canonical URLs point to CloudFront. Restricting it
+  CloudFront caching. Canonical URLs point to `kshitijpal.in`. Restricting it
   would need CloudFront to send a secret origin header and the application
   to check it in `proxy.ts`, which is not worth the extra code today.
 - **Rate limiting** stays the per-instance baseline described in

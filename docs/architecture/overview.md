@@ -1,9 +1,10 @@
 # Architecture Overview
 
-Status: AWS production deployment infrastructure (Milestone 9), after SEO,
-accessibility, and performance hardening (Milestone 8), the contact page and
-form delivery (Milestone 7), and the evolved Experience journey
-(Milestone 6.5). This document
+Status: live at https://kshitijpal.in after production hardening
+(Milestone 11), the AWS deployment (Milestone 9), SEO, accessibility, and
+performance hardening (Milestone 8), the contact page and form delivery
+(Milestone 7), and the evolved Experience journey (Milestone 6.5). This
+document
 describes the intended shape of the system and what exists today. It is
 updated as parts are implemented.
 
@@ -32,7 +33,7 @@ Resend (see "Contact form" below).
 | UI components | Reusable presentational components, grouped by domain.     | Primitives, global site shell  |
 | Styling       | Tailwind CSS with design tokens in CSS custom properties.  | Design tokens defined          |
 | Motion        | Motion tokens, CSS micro-interactions, Motion for React.   | Motion language and primitives |
-| Deployment    | CloudFront, Lambda (Next.js standalone), S3; see below.    | Implemented, not yet deployed  |
+| Deployment    | CloudFront, Lambda (Next.js standalone), S3; see below.    | Live at `kshitijpal.in`        |
 
 Contact form delivery (Resend) is implemented. Planned integrations, not
 implemented yet: error monitoring (Sentry) and analytics (Google Analytics).
@@ -43,10 +44,11 @@ Environment variables are introduced only when a feature requires them: the
 three contact form settings and `SITE_URL`, the canonical origin, all in
 `.env.example`.
 
-Production runs on AWS: CloudFront in front of the Next.js standalone server
-on Lambda (through the AWS Lambda Web Adapter) and an S3 bucket for
-`/_next/static`, defined in CloudFormation under `infra/` and deployed by
-GitHub Actions on every push to `main`. Architecture, setup, caching,
+Production runs on AWS at `https://kshitijpal.in`: CloudFront in front of
+the Next.js standalone server on Lambda (through the AWS Lambda Web Adapter)
+and an S3 bucket for `/_next/static`, defined in CloudFormation under
+`infra/` and deployed by GitHub Actions on every push to `main`.
+Architecture, setup, caching, the custom domain,
 secrets, and operations: [`deployment.md`](deployment.md); the choice is
 recorded in [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 

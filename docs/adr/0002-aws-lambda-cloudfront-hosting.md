@@ -61,3 +61,10 @@ least-privilege permissions.
   `overview.md`).
 - A custom domain later means adding an alias and an ACM certificate to the
   distribution, with no application change.
+
+## Update (2026-10-04)
+
+The custom domain `kshitijpal.in` now serves the site through this
+distribution, and canonical URLs point to it rather than to CloudFront. The
+alias and certificate were attached outside the template; see "Custom
+domain" in `docs/architecture/deployment.md`. The decision is unchanged.

@@ -12,18 +12,26 @@ It is read from the `SITE_URL` environment variable **at build time** (pages,
 the sitemap, and robots are prerendered, so the value is baked into the
 build).
 
-- Unset (the current state): no production domain exists yet, so canonical
-  URLs, `og:url`, `metadataBase`, sitemap entries, the robots `Sitemap:`
-  line, and structured-data URLs are all omitted. Nothing falls back to
-  `localhost` or a placeholder domain.
+- Unset (local development and tests): canonical URLs, `og:url`,
+  `metadataBase`, sitemap entries, the robots `Sitemap:` line, and
+  structured-data URLs are all omitted. Nothing falls back to `localhost` or
+  a placeholder domain.
 - Set: it must be a bare origin such as `https://domain.tld` (no path, query,
   or hash). A malformed value throws and fails the build.
 
-To go live, set `SITE_URL` in the production build environment; no code
-changes are needed. In production it is the `SITE_URL` variable of the
-GitHub `production` environment: the CloudFront URL after the first deploy,
-and the custom domain later (see [`deployment.md`](deployment.md)). Tests pin `SITE_URL` to empty (`vitest.config.mts`) and
-stub it where they need a URL, using the reserved `portfolio.test` domain.
+In production it is `https://kshitijpal.in`, the `SITE_URL` variable of the
+GitHub `production` environment; the deploy job refuses to build without a
+bare `https://` value (see [`deployment.md`](deployment.md)). The domain is
+never written in code. The temporary `*.cloudfront.net` hostname is not
+canonical: it serves the same build, so its pages declare `kshitijpal.in`.
+Tests pin `SITE_URL` to empty (`vitest.config.mts`) and stub it where they
+need a URL, using the reserved `portfolio.test` domain.
+
+Next.js writes the Home canonical and `og:url` as the bare origin
+(`https://kshitijpal.in`) and every other URL without a trailing slash
+(`trailingSlash` is off); the sitemap and JSON-LD write Home as
+`https://kshitijpal.in/`. Both spellings are the same URL: an empty path
+is `/`.
 
 ## Metadata
 
@@ -53,7 +61,8 @@ routes never assemble social tags themselves.
   When real assets exist, add `app/opengraph-image.(png|jpg)` (or a
   per-route one) and `app/icon.(png|svg)`/`app/favicon.ico`; Next.js emits the
   tags from those file conventions, and the card can become
-  `summary_large_image`.
+  `summary_large_image`. Until then browsers' automatic `/favicon.ico`
+  request returns 404, which Lighthouse reports as a console error.
 - **Robots meta.** Indexable pages carry no robots tag (indexing is the
   default). Next.js adds `noindex` to every 404 response.
 
@@ -138,10 +147,12 @@ built from repository content only; contact form input never reaches it.
   is the face of each page's largest text element.
 - No images ship today. A future portrait uses `next/image` with intrinsic
   dimensions (see "Portrait" in [`project-structure.md`](project-structure.md)).
-- `next.config.ts` sets `X-Content-Type-Options`, `Referrer-Policy`, and
-  `Permissions-Policy`, and removes `X-Powered-By`. A Content Security Policy
-  is deferred to the hosting setup: the inline theme script and JSON-LD would
-  need hashes or nonces. These headers apply when Next.js serves the site;
+- `next.config.ts` sets `Strict-Transport-Security`,
+  `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy`, and
+  removes `X-Powered-By`. A Content Security Policy remains deferred: the
+  inline theme script and JSON-LD would need hashes or nonces (reasons in
+  "Security headers" in [`deployment.md`](deployment.md)). These headers
+  apply when Next.js serves the site;
   in production CloudFront passes them through and repeats them for the
   static assets it serves from S3 (see "Security headers" in
   [`deployment.md`](deployment.md)).

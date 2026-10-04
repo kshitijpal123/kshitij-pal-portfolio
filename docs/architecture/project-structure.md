@@ -573,7 +573,8 @@ Test directories mirror the source tree: a test for
 `tests/helpers/` holds stand-ins for browser APIs that jsdom lacks, such as
 `intersectionObserver.ts`, and test fixtures such as `articles.ts`, imported
 by the tests that need them. `tests/mdx-components.test.tsx` covers the root
-`mdx-components.tsx`.
+`mdx-components.tsx`, and `tests/next.config.test.ts` the security headers
+in `next.config.ts` and their CloudFront copy in `infra/portfolio.yaml`.
 
 ## Imports
 

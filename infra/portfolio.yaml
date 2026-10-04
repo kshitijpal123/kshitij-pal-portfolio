@@ -180,6 +180,11 @@ Resources:
       ResponseHeadersPolicyConfig:
         Name: !Sub "${AWS::StackName}-static-headers"
         SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
           ContentTypeOptions:
             Override: true
           ReferrerPolicy:
@@ -191,6 +196,10 @@ Resources:
               Value: camera=(), microphone=(), geolocation=()
               Override: true
 
+  # The custom domain (alias and its us-east-1 ACM certificate) is attached
+  # outside this template. Any change to this resource makes CloudFormation
+  # rewrite the distribution config without it; read "Custom domain" in
+  # docs/architecture/deployment.md first.
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -236,8 +245,10 @@ Resources:
           CloudFrontDefaultCertificate: true
 
 Outputs:
-  SiteUrl:
-    Description: Production origin. Set it as the GitHub variable SITE_URL.
+  DistributionUrl:
+    Description: >-
+      Default *.cloudfront.net origin of the distribution. Not canonical: the
+      public origin is the custom domain in the GitHub variable SITE_URL.
     Value: !Sub "https://${Distribution.DomainName}"
   DistributionId:
     Value: !Ref Distribution

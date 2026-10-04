@@ -4,10 +4,13 @@ import type { NextConfig } from "next";
 /*
  * Only headers that cannot affect rendering. A Content Security Policy is
  * deliberately absent: the inline theme script and JSON-LD need hashes or
- * nonces. CloudFront repeats these values for `/_next/static/*`, which it
- * serves from S3 (`infra/portfolio.yaml`); keep both in step.
+ * nonces. HSTS omits `includeSubDomains` and `preload`, which would bind
+ * hostnames this site does not serve. CloudFront repeats these values for
+ * `/_next/static/*`, which it serves from S3 (`infra/portfolio.yaml`); keep
+ * both in step.
  */
 const securityHeaders = [
+  { key: "Strict-Transport-Security", value: "max-age=31536000" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
