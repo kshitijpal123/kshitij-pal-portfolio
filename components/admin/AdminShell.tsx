@@ -6,7 +6,14 @@ import { Section } from "@/components/ui/Section";
 import { logoutAction } from "@/lib/admin/actions";
 import type { PublicUser } from "@/lib/admin/model";
 
-export type AdminPage = "dashboard" | "senders" | "users" | "approvals";
+export type AdminPage =
+  | "dashboard"
+  | "compose"
+  | "contacts"
+  | "templates"
+  | "senders"
+  | "users"
+  | "approvals";
 
 const navigation: {
   page: AdminPage;
@@ -15,6 +22,9 @@ const navigation: {
   ownerOnly?: boolean;
 }[] = [
   { page: "dashboard", label: "Dashboard", href: "/admin" },
+  { page: "compose", label: "Compose", href: "/admin/compose" },
+  { page: "contacts", label: "Contacts", href: "/admin/contacts" },
+  { page: "templates", label: "Templates", href: "/admin/templates" },
   { page: "senders", label: "Sender identities", href: "/admin/senders" },
   { page: "users", label: "Users", href: "/admin/users", ownerOnly: true },
   {

@@ -8,8 +8,15 @@ import {
   getBootstrapToken,
   login,
 } from "@/lib/admin/auth";
-import type { FormState } from "@/lib/admin/formState";
+import {
+  type ContactOutcome,
+  createContact,
+  deleteContact,
+  updateContact,
+} from "@/lib/admin/contacts";
+import type { ComposeState, FormState } from "@/lib/admin/formState";
 import { getAdminStore } from "@/lib/admin/getAdminStore";
+import { getGmailClient } from "@/lib/admin/gmailApi";
 import {
   disconnectGmail,
   startGmailConnection,
@@ -34,16 +41,33 @@ import {
   requireUser,
   setSessionCookie,
 } from "@/lib/admin/session";
+import {
+  describeRecipientResult,
+  describeSendRejection,
+  newOperationId,
+  sendEmail,
+} from "@/lib/admin/sending";
+import { updateUserSettings } from "@/lib/admin/settings";
+import {
+  createTemplate,
+  deleteTemplate,
+  type TemplateOutcome,
+  updateTemplate,
+} from "@/lib/admin/templates";
 import { getTokenCipher } from "@/lib/admin/tokenCipher";
 import { setUserStatus } from "@/lib/admin/users";
 import {
   normalizeEmail,
   readField,
+  validateContact,
   validateEmailField,
   validateLogin,
   validateNewAccount,
   validateOwnerSetup,
   validateRejectionReason,
+  validateSend,
+  validateSettings,
+  validateTemplate,
 } from "@/lib/admin/validation";
 
 /*
@@ -397,4 +421,241 @@ export async function disconnectGmailAction(formData: FormData) {
     outcome = "failed";
   }
   redirect(gmailResult(outcome));
+}
+
+/*
+ * Mail actions (M3). Contacts, templates, and sends are always the signed-in
+ * user's own: the domain functions take the actor from `requireUser()` and
+ * look records up under that user's ID. A `userId` in the form is never
+ * read. Results are fixed messages; nothing from Google is passed through.
+ */
+
+const contactFailures: Record<Exclude<ContactOutcome, "saved">, string> = {
+  duplicate: "You already have a contact with this email.",
+  "not-found": "That contact was not found.",
+  disabled: "Contacts are turned off for your account.",
+  limit: "You have reached the maximum number of contacts.",
+};
+
+function textValues(formData: FormData, fields: readonly string[]) {
+  return Object.fromEntries(
+    fields.map((field) => [field, readField(formData, field)]),
+  );
+}
+
+export async function saveContactAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const actor = await requireUser();
+  const contactId = readField(formData, "contactId");
+  const values = textValues(formData, ["name", "email", "company", "notes"]);
+  const parsed = validateContact(formData);
+  if (!parsed.success) {
+    return { status: "error", fieldErrors: parsed.errors, values };
+  }
+
+  let outcome: ContactOutcome;
+  try {
+    const store = getAdminStore();
+    outcome = contactId
+      ? await updateContact(store, actor, contactId, parsed.data, new Date())
+      : await createContact(store, actor, parsed.data, new Date());
+  } catch (error) {
+    logFailure("Contact save", error);
+    return { ...unexpected, values };
+  }
+
+  if (outcome !== "saved") {
+    return { status: "error", message: contactFailures[outcome], values };
+  }
+  revalidatePath("/admin/contacts");
+  if (contactId) redirect("/admin/contacts");
+  return { status: "success", message: `Saved ${parsed.data.name}.` };
+}
+
+export async function deleteContactAction(formData: FormData) {
+  const actor = await requireUser();
+  await deleteContact(getAdminStore(), actor, readField(formData, "contactId"));
+  revalidatePath("/admin/contacts");
+}
+
+const templateFailures: Record<Exclude<TemplateOutcome, "saved">, string> = {
+  "not-found": "That template was not found.",
+  disabled: "Templates are turned off for your account.",
+  limit: "You have reached the maximum number of templates.",
+};
+
+export async function saveTemplateAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const actor = await requireUser();
+  const templateId = readField(formData, "templateId");
+  const values = textValues(formData, ["name", "subject", "body"]);
+  const parsed = validateTemplate(formData);
+  if (!parsed.success) {
+    return { status: "error", fieldErrors: parsed.errors, values };
+  }
+
+  let outcome: TemplateOutcome;
+  try {
+    const store = getAdminStore();
+    outcome = templateId
+      ? await updateTemplate(store, actor, templateId, parsed.data, new Date())
+      : await createTemplate(store, actor, parsed.data, new Date());
+  } catch (error) {
+    logFailure("Template save", error);
+    return { ...unexpected, values };
+  }
+
+  if (outcome !== "saved") {
+    return { status: "error", message: templateFailures[outcome], values };
+  }
+  revalidatePath("/admin/templates");
+  if (templateId) redirect("/admin/templates");
+  return { status: "success", message: `Saved ${parsed.data.name}.` };
+}
+
+export async function deleteTemplateAction(formData: FormData) {
+  const actor = await requireUser();
+  await deleteTemplate(
+    getAdminStore(),
+    actor,
+    readField(formData, "templateId"),
+  );
+  revalidatePath("/admin/templates");
+}
+
+/**
+ * Sends synchronously within this request. The form carries an idempotency
+ * key (`operationId`) made by the server; a repeated submission with it
+ * never sends to the same recipient twice.
+ */
+export async function sendEmailAction(
+  previous: ComposeState,
+  formData: FormData,
+): Promise<ComposeState> {
+  const actor = await requireUser();
+  const parsed = validateSend(formData);
+  const operationId = parsed.success
+    ? parsed.data.operationId
+    : previous.operationId;
+  if (!parsed.success) {
+    return {
+      status: "error",
+      operationId,
+      fieldErrors: parsed.errors,
+      message: "Check the highlighted fields. Nothing was sent.",
+    };
+  }
+
+  const google = getGoogleOAuthClient();
+  const cipher = getTokenCipher();
+  if (!google || !cipher) {
+    return {
+      status: "error",
+      operationId,
+      message: "Gmail is not configured on this server. Nothing was sent.",
+    };
+  }
+
+  let outcome;
+  try {
+    outcome = await sendEmail(
+      { store: getAdminStore(), google, cipher, gmail: getGmailClient() },
+      actor,
+      parsed.data,
+      new Date(),
+    );
+  } catch (error) {
+    logFailure("Send", error);
+    return {
+      status: "error",
+      operationId,
+      message:
+        "Something went wrong. Check the history below before sending again.",
+    };
+  }
+
+  revalidatePath("/admin/compose");
+  if (!outcome.ok) {
+    return {
+      status: "error",
+      operationId,
+      message: describeSendRejection(outcome),
+    };
+  }
+
+  const results = outcome.results.map((result) => ({
+    email: result.email,
+    status: result.status,
+    message: describeRecipientResult(result),
+  }));
+  const sent = results.filter((result) => result.status === "SENT").length;
+  const finished = results.every(
+    (result) => result.status === "SENT" || result.status === "ALREADY_SENT",
+  );
+  if (finished) {
+    return {
+      status: "success",
+      operationId: newOperationId(new Date()),
+      message:
+        sent === results.length
+          ? `Sent ${sent} ${sent === 1 ? "email" : "emails"}.`
+          : `Sent ${sent}; the rest were already sent earlier.`,
+      results,
+    };
+  }
+  return {
+    status: "error",
+    operationId,
+    message: `Sent ${sent} of ${results.length}. Sending again retries only the recipients marked "Not sent".`,
+    results,
+  };
+}
+
+const settingsFields = [
+  "dailyTotalEmails",
+  "dailyBulkRecipients",
+  "maxBulkRecipientsPerOperation",
+] as const;
+
+/** OWNER only; the domain function refuses anyone else. */
+export async function updateUserSettingsAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const actor = await requireUser();
+  const values = textValues(formData, settingsFields);
+  const parsed = validateSettings(formData);
+  if (!parsed.success) {
+    return { status: "error", fieldErrors: parsed.errors, values };
+  }
+
+  let outcome;
+  try {
+    outcome = await updateUserSettings(
+      getAdminStore(),
+      actor,
+      readField(formData, "userId"),
+      parsed.data,
+      new Date(),
+    );
+  } catch (error) {
+    logFailure("Settings update", error);
+    return { ...unexpected, values };
+  }
+
+  if (outcome !== "updated") {
+    return {
+      status: "error",
+      message:
+        outcome === "forbidden"
+          ? "Only the owner can change sending settings."
+          : "That user was not found.",
+    };
+  }
+  revalidatePath("/admin/users");
+  return { status: "success", message: "Settings saved." };
 }

@@ -10,10 +10,14 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { createDynamoStore } from "@/lib/admin/dynamoStore";
 import type {
+  Contact,
+  EmailTemplate,
   GmailConnection,
   Invitation,
   OAuthState,
+  SendRecord,
   User,
+  UserSettings,
 } from "@/lib/admin/model";
 
 type Command = { input: Record<string, unknown> };
@@ -97,6 +101,50 @@ const connection: GmailConnection = {
   connectedAt: now.toISOString(),
   lastValidatedAt: now.toISOString(),
   disconnectedAt: null,
+};
+
+const contact: Contact = {
+  id: "c1",
+  userId: "u1",
+  name: "Rahul",
+  email: "rahul@example.com",
+  company: null,
+  notes: null,
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString(),
+};
+
+const template: EmailTemplate = {
+  id: "t1",
+  userId: "u1",
+  name: "Hello",
+  subject: "Hi {{name}}",
+  body: "Hello {{name}}",
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString(),
+};
+
+const operationId = "1791277200000.AAAAAAAAAAAAAAAAAAAAAA";
+
+const sendRecord: SendRecord = {
+  id: `${operationId}:a`,
+  userId: "u1",
+  operationId,
+  senderIdentityId: "s1",
+  gmailConnectionId: "g1",
+  senderEmail: "friend@gmail.com",
+  recipient: "rahul@example.com",
+  subject: "Hi Rahul",
+  templateId: null,
+  bulk: true,
+  quotaDay: "2026-10-06",
+  status: "RESERVED",
+  attempts: 1,
+  gmailMessageId: null,
+  failureCode: null,
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString(),
+  completedAt: null,
 };
 
 describe("createDynamoStore", () => {
@@ -410,6 +458,397 @@ describe("createDynamoStore", () => {
     expect(fake.calls()[0].input).toMatchObject({
       Key: { pk: "GMAIL", sk: "s1" },
       ConsistentRead: true,
+    });
+  });
+
+  it("stores settings per user and reads them back without keys", async () => {
+    const settings: UserSettings = {
+      userId: "u1",
+      sendingEnabled: true,
+      bulkSendingEnabled: false,
+      templatesEnabled: true,
+      contactsEnabled: true,
+      dailyTotalEmails: 50,
+      dailyBulkRecipients: 25,
+      maxBulkRecipientsPerOperation: 10,
+      updatedAt: now.toISOString(),
+      updatedBy: "owner",
+    };
+    const fake = client((command) =>
+      command instanceof GetCommand
+        ? { Item: { pk: "SETTINGS", sk: "u1", ...settings } }
+        : {},
+    );
+    const store = createDynamoStore("table", fake);
+    await store.saveUserSettings(settings);
+    expect(await store.getUserSettings("u1")).toEqual(settings);
+    const [put, get] = fake.calls();
+    expect(put.input.Item).toMatchObject({ pk: "SETTINGS", sk: "u1" });
+    expect(get.input).toMatchObject({
+      Key: { pk: "SETTINGS", sk: "u1" },
+      ConsistentRead: true,
+    });
+  });
+
+  it("creates a contact with its per-user email lock in one transaction", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.createContact(contact)).toBe("saved");
+
+    const [command] = fake.calls();
+    expect(command).toBeInstanceOf(TransactWriteCommand);
+    const items = command.input.TransactItems as {
+      Put: Record<string, unknown>;
+    }[];
+    expect(items.map((item) => item.Put.Item)).toEqual([
+      expect.objectContaining({ pk: "CONTACT#u1", sk: "c1", userId: "u1" }),
+      { pk: "CONTACT_EMAIL#u1", sk: "rahul@example.com", contactId: "c1" },
+    ]);
+    for (const item of items) {
+      expect(item.Put.ConditionExpression).toBe("attribute_not_exists(pk)");
+    }
+
+    const duplicate = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("None", "ConditionalCheckFailed");
+      }),
+    );
+    expect(await duplicate.createContact(contact)).toBe("duplicate");
+  });
+
+  it("moves the email lock when a contact's email changes", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    const moved = { ...contact, email: "new@example.com" };
+    expect(await store.updateContact(moved, contact.email)).toBe("saved");
+
+    const items = fake.calls()[0].input.TransactItems as Record<
+      string,
+      Record<string, unknown>
+    >[];
+    expect(items[0].Put).toMatchObject({
+      Item: expect.objectContaining({ pk: "CONTACT#u1", sk: "c1" }),
+      ConditionExpression: "attribute_exists(pk) AND email = :previous",
+      ExpressionAttributeValues: { ":previous": "rahul@example.com" },
+    });
+    expect(items[1].Delete).toMatchObject({
+      Key: { pk: "CONTACT_EMAIL#u1", sk: "rahul@example.com" },
+      ConditionExpression: "contactId = :id",
+    });
+    expect(items[2].Put).toMatchObject({
+      Item: { pk: "CONTACT_EMAIL#u1", sk: "new@example.com", contactId: "c1" },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+
+    const taken = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("None", "None", "ConditionalCheckFailed");
+      }),
+    );
+    expect(await taken.updateContact(moved, contact.email)).toBe("duplicate");
+    const gone = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("ConditionalCheckFailed", "None", "None");
+      }),
+    );
+    expect(await gone.updateContact(moved, contact.email)).toBe("not-found");
+  });
+
+  it("updates a contact without touching the lock when the email is unchanged", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    await store.updateContact({ ...contact, name: "R" }, contact.email);
+    expect(fake.calls()[0].input.TransactItems).toHaveLength(1);
+  });
+
+  it("deletes a contact and its lock together", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.deleteContact("u1", "c1", contact.email)).toBe(true);
+    const items = fake.calls()[0].input.TransactItems as Record<
+      string,
+      Record<string, unknown>
+    >[];
+    expect(items.map((item) => item.Delete.Key)).toEqual([
+      { pk: "CONTACT#u1", sk: "c1" },
+      { pk: "CONTACT_EMAIL#u1", sk: "rahul@example.com" },
+    ]);
+
+    const missing = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("ConditionalCheckFailed", "None");
+      }),
+    );
+    expect(await missing.deleteContact("u1", "c1", contact.email)).toBe(false);
+  });
+
+  it("partitions contacts and templates by user", async () => {
+    const fake = client(() => ({ Items: [] }));
+    const store = createDynamoStore("table", fake);
+    await store.listContacts("u1");
+    await store.listTemplates("u2");
+    await store.getContact("u1", "c1");
+    await store.getTemplate("u2", "t1");
+    const [contacts, templates, getContact, getTemplate] = fake.calls();
+    expect(contacts.input.ExpressionAttributeValues).toEqual({
+      ":pk": "CONTACT#u1",
+    });
+    expect(templates.input.ExpressionAttributeValues).toEqual({
+      ":pk": "TEMPLATE#u2",
+    });
+    expect(getContact.input.Key).toEqual({ pk: "CONTACT#u1", sk: "c1" });
+    expect(getTemplate.input.Key).toEqual({ pk: "TEMPLATE#u2", sk: "t1" });
+  });
+
+  it("writes templates conditionally and reports a missing one", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    await store.createTemplate(template);
+    expect(fake.calls()[0].input).toMatchObject({
+      Item: expect.objectContaining({ pk: "TEMPLATE#u1", sk: "t1" }),
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+
+    const missing = createDynamoStore(
+      "table",
+      client(() => {
+        throw conditionFailure();
+      }),
+    );
+    expect(await missing.updateTemplate(template)).toBe(false);
+    expect(
+      await createDynamoStore(
+        "table",
+        client(() => ({})),
+      ).deleteTemplate("u1", "t1"),
+    ).toBe(false);
+  });
+
+  it("reserves sends with a counter condition that never exceeds the limits", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    const retried = { ...sendRecord, id: `${operationId}:b` };
+    expect(
+      await store.reserveSends({
+        userId: "u1",
+        day: "2026-10-06",
+        bulk: true,
+        limits: { dailyTotalEmails: 50, dailyBulkRecipients: 25 },
+        create: [sendRecord],
+        retry: [retried],
+      }),
+    ).toBe("reserved");
+
+    const items = fake.calls()[0].input.TransactItems as Record<
+      string,
+      Record<string, unknown>
+    >[];
+    expect(items[0].Update).toMatchObject({
+      Key: { pk: "QUOTA#u1", sk: "2026-10-06" },
+      UpdateExpression:
+        "SET expiresAtEpoch = :ttl ADD #total :count, #bulk :count",
+      ExpressionAttributeNames: { "#total": "total", "#bulk": "bulk" },
+      ExpressionAttributeValues: {
+        ":count": 2,
+        ":totalCeiling": 48,
+        ":bulkCeiling": 23,
+        ":ttl": Date.parse("2026-10-14T00:00:00.000Z") / 1000,
+      },
+    });
+    expect(items[0].Update.ConditionExpression).toContain(
+      "#total <= :totalCeiling",
+    );
+    expect(items[1].Put).toMatchObject({
+      Item: expect.objectContaining({
+        pk: "SEND#u1",
+        sk: sendRecord.id,
+        expiresAtEpoch: Date.parse("2027-01-04T09:00:00.000Z") / 1000,
+      }),
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+    expect(items[2].Put).toMatchObject({
+      ConditionExpression: "#status = :failed",
+      ExpressionAttributeValues: { ":failed": "FAILED" },
+    });
+  });
+
+  it("counts an individual send against the total limit only", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    await store.reserveSends({
+      userId: "u1",
+      day: "2026-10-06",
+      bulk: false,
+      limits: { dailyTotalEmails: 50, dailyBulkRecipients: 0 },
+      create: [{ ...sendRecord, bulk: false }],
+      retry: [],
+    });
+    const [item] = fake.calls()[0].input.TransactItems as Record<
+      string,
+      Record<string, unknown>
+    >[];
+    expect(item.Update.ExpressionAttributeNames).toEqual({ "#total": "total" });
+    expect(item.Update.ConditionExpression).not.toContain("#bulk");
+  });
+
+  it("refuses a reservation larger than the limit without writing", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(
+      await store.reserveSends({
+        userId: "u1",
+        day: "2026-10-06",
+        bulk: true,
+        limits: { dailyTotalEmails: 50, dailyBulkRecipients: 1 },
+        create: [sendRecord, { ...sendRecord, id: `${operationId}:b` }],
+        retry: [],
+      }),
+    ).toBe("limit");
+    expect(fake.calls()).toEqual([]);
+  });
+
+  it("maps a cancelled reservation to a limit or a record conflict", async () => {
+    const request = {
+      userId: "u1",
+      day: "2026-10-06",
+      bulk: false,
+      limits: { dailyTotalEmails: 50, dailyBulkRecipients: 25 },
+      create: [sendRecord],
+      retry: [],
+    };
+    const limited = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("ConditionalCheckFailed", "None");
+      }),
+    );
+    expect(await limited.reserveSends(request)).toBe("limit");
+    const conflicted = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("None", "ConditionalCheckFailed");
+      }),
+    );
+    expect(await conflicted.reserveSends(request)).toBe("conflict");
+  });
+
+  it("finishes a sent record only while it is still reserved", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(
+      await store.finishSend(sendRecord, {
+        status: "SENT",
+        gmailMessageId: "gm-1",
+        at: now.toISOString(),
+      }),
+    ).toBe(true);
+    const [command] = fake.calls();
+    expect(command).toBeInstanceOf(UpdateCommand);
+    expect(command.input).toMatchObject({
+      Key: { pk: "SEND#u1", sk: sendRecord.id },
+      ConditionExpression: "#status = :reserved",
+      ExpressionAttributeValues: expect.objectContaining({
+        ":status": "SENT",
+        ":result": "gm-1",
+      }),
+    });
+
+    const settled = createDynamoStore(
+      "table",
+      client(() => {
+        throw conditionFailure();
+      }),
+    );
+    expect(
+      await settled.finishSend(sendRecord, {
+        status: "UNCERTAIN",
+        failureCode: "gmail-unavailable",
+        at: now.toISOString(),
+      }),
+    ).toBe(false);
+  });
+
+  it("releases the reservation in the same transaction as a failure", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    await store.finishSend(sendRecord, {
+      status: "FAILED",
+      failureCode: "gmail-rejected",
+      at: now.toISOString(),
+    });
+    const items = fake.calls()[0].input.TransactItems as Record<
+      string,
+      Record<string, unknown>
+    >[];
+    expect(items[0].Update).toMatchObject({
+      Key: { pk: "SEND#u1", sk: sendRecord.id },
+      ConditionExpression: "#status = :reserved",
+    });
+    expect(items[1].Update).toMatchObject({
+      Key: { pk: "QUOTA#u1", sk: "2026-10-06" },
+      UpdateExpression: "ADD #total :release, #bulk :release",
+      ExpressionAttributeValues: { ":release": -1 },
+    });
+  });
+
+  it("queries one operation by prefix and recent sends newest first", async () => {
+    const page = () => ({
+      Items: [
+        {
+          pk: "SEND#u1",
+          sk: sendRecord.id,
+          expiresAtEpoch: 1,
+          ...sendRecord,
+        },
+      ],
+      LastEvaluatedKey: { pk: "SEND#u1", sk: "next" },
+    });
+    const fake = client(page);
+    const store = createDynamoStore("table", fake);
+    expect(await store.listRecentSendRecords("u1", 20)).toEqual([sendRecord]);
+    expect(fake.calls()[0].input).toMatchObject({
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: { ":pk": "SEND#u1" },
+      ScanIndexForward: false,
+      Limit: 20,
+      ConsistentRead: true,
+    });
+
+    const paged = client((command) =>
+      command.input.ExclusiveStartKey ? { Items: [] } : page(),
+    );
+    await createDynamoStore("table", paged).listSendRecordsForOperation(
+      "u1",
+      operationId,
+    );
+    const [first, second] = paged.calls();
+    expect(first.input).toMatchObject({
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :operation)",
+      ExpressionAttributeValues: {
+        ":pk": "SEND#u1",
+        ":operation": `${operationId}:`,
+      },
+    });
+    expect(second.input.ExclusiveStartKey).toEqual({
+      pk: "SEND#u1",
+      sk: "next",
+    });
+  });
+
+  it("reads zero usage for a day without counters", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.getDailyUsage("u1", "2026-10-06")).toEqual({
+      total: 0,
+      bulk: 0,
+    });
+    expect(fake.calls()[0].input.Key).toEqual({
+      pk: "QUOTA#u1",
+      sk: "2026-10-06",
     });
   });
 

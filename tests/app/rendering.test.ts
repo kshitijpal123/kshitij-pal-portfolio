@@ -21,11 +21,15 @@ describe("server and client boundaries", () => {
   it("limits Client Components to interaction, theme, and motion", () => {
     expect(sourceFiles("components").filter(isClient)).toEqual([
       "components/admin/AcceptInvitationForm.tsx",
+      "components/admin/ComposeForm.tsx",
+      "components/admin/ContactForm.tsx",
       "components/admin/GmailConnectButton.tsx",
       "components/admin/InviteForm.tsx",
       "components/admin/LoginForm.tsx",
       "components/admin/SenderRequestForm.tsx",
       "components/admin/SetupForm.tsx",
+      "components/admin/TemplateForm.tsx",
+      "components/admin/UserSettingsForm.tsx",
       "components/contact/ContactForm.tsx",
       "components/experience/JourneyTrajectory.tsx",
       "components/hero/TechnicalHeroVisual.tsx",
@@ -55,7 +59,7 @@ describe("private console rendering", () => {
     const pages = sourceFiles("app/admin").filter((file) =>
       file.endsWith("/page.tsx"),
     );
-    expect(pages).toHaveLength(7);
+    expect(pages).toHaveLength(10);
     for (const file of pages) {
       expect(readFileSync(file, "utf8"), file).toMatch(
         /from "@\/lib\/admin\/session"/,

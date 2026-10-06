@@ -1,13 +1,47 @@
 import type {
+  Contact,
+  DailyUsage,
+  EmailTemplate,
   GmailConnection,
   Invitation,
   OAuthState,
+  SendFailureCode,
+  SendRecord,
   SenderIdentity,
   SenderIdentityStatus,
   Session,
   User,
+  UserSettings,
   UserStatus,
 } from "@/lib/admin/model";
+
+export type ContactWriteResult = "saved" | "duplicate" | "not-found";
+
+export type ReserveSendsRequest = {
+  userId: string;
+  /** UTC day whose counters are charged. */
+  day: string;
+  bulk: boolean;
+  limits: Pick<UserSettings, "dailyTotalEmails" | "dailyBulkRecipients">;
+  /** New RESERVED records; each must not exist yet. */
+  create: SendRecord[];
+  /** RESERVED replacements for records that must still be FAILED. */
+  retry: SendRecord[];
+};
+
+/**
+ * `limit`: the reservation would exceed a daily limit; nothing was written.
+ * `conflict`: another request created or changed one of the records first.
+ */
+export type ReserveSendsResult = "reserved" | "limit" | "conflict";
+
+export type SendCompletion =
+  | { status: "SENT"; gmailMessageId: string; at: string }
+  | {
+      status: "FAILED" | "UNCERTAIN";
+      failureCode: SendFailureCode;
+      at: string;
+    };
 
 export type CreateOwnerResult = "created" | "owner-exists";
 
@@ -103,4 +137,65 @@ export type AdminStore = {
   listGmailConnectionsForUser(userId: string): Promise<GmailConnection[]>;
   /** Creates or replaces the connection for its sender identity. */
   saveGmailConnection(connection: GmailConnection): Promise<void>;
+
+  /** `null` when the user has never had settings saved (use the defaults). */
+  getUserSettings(userId: string): Promise<UserSettings | null>;
+  saveUserSettings(settings: UserSettings): Promise<void>;
+
+  /*
+   * Contacts, templates, and send records are addressed by their owner's
+   * user ID as well as their own: a record of another user cannot be read
+   * or written through these methods whatever ID is passed.
+   */
+  listContacts(userId: string): Promise<Contact[]>;
+  getContact(userId: string, contactId: string): Promise<Contact | null>;
+  /** `duplicate` when the user already has a contact with this email. */
+  createContact(
+    contact: Contact,
+  ): Promise<Exclude<ContactWriteResult, "not-found">>;
+  /**
+   * Replaces a contact whose stored email is still `previousEmail`, moving
+   * the per-user unique-email lock when the email changes.
+   */
+  updateContact(
+    contact: Contact,
+    previousEmail: string,
+  ): Promise<ContactWriteResult>;
+  /** `false` unless the contact existed with this email. */
+  deleteContact(
+    userId: string,
+    contactId: string,
+    email: string,
+  ): Promise<boolean>;
+
+  listTemplates(userId: string): Promise<EmailTemplate[]>;
+  getTemplate(
+    userId: string,
+    templateId: string,
+  ): Promise<EmailTemplate | null>;
+  createTemplate(template: EmailTemplate): Promise<void>;
+  /** `false` when the template does not exist. */
+  updateTemplate(template: EmailTemplate): Promise<boolean>;
+  deleteTemplate(userId: string, templateId: string): Promise<boolean>;
+
+  getDailyUsage(userId: string, day: string): Promise<DailyUsage>;
+  /**
+   * In one atomic step: charges `create.length + retry.length` sends to the
+   * day's counters (and the bulk counter when `bulk`) only if every limit
+   * still holds, and writes the records only if none was created or changed
+   * meanwhile. Concurrent reservations can never exceed a limit.
+   */
+  reserveSends(request: ReserveSendsRequest): Promise<ReserveSendsResult>;
+  /**
+   * Finalizes a RESERVED record once. FAILED also gives its reservation
+   * back to the counters, in the same atomic step. `false` when the record
+   * was no longer RESERVED.
+   */
+  finishSend(record: SendRecord, completion: SendCompletion): Promise<boolean>;
+  listSendRecordsForOperation(
+    userId: string,
+    operationId: string,
+  ): Promise<SendRecord[]>;
+  /** Newest operations first. */
+  listRecentSendRecords(userId: string, limit: number): Promise<SendRecord[]>;
 };

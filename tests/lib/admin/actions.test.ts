@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as actions from "@/lib/admin/actions";
 import { idleFormState } from "@/lib/admin/formState";
+import type { GmailClient } from "@/lib/admin/gmailApi";
 import { completeGmailConnection } from "@/lib/admin/gmailConnections";
 import type { GoogleOAuthClient } from "@/lib/admin/googleOAuth";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
+import { newOperationId } from "@/lib/admin/sending";
 import type { AdminStore } from "@/lib/admin/store";
 import {
   createLocalTokenCipher,
@@ -25,6 +27,7 @@ import {
   setupToken,
   userPassword,
 } from "@/tests/helpers/admin";
+import { createFakeGmail, seedConnectedSender } from "@/tests/helpers/mail";
 import { NavigationSignal } from "@/tests/helpers/nextRequest";
 
 const next = await vi.hoisted(async () => {
@@ -35,6 +38,7 @@ const next = await vi.hoisted(async () => {
     store: undefined as AdminStore | undefined,
     google: null as GoogleOAuthClient | null,
     cipher: null as TokenCipher | null,
+    gmail: null as GmailClient | null,
   };
 });
 
@@ -52,6 +56,10 @@ vi.mock("@/lib/admin/googleOAuth", async (importOriginal) => ({
 vi.mock("@/lib/admin/tokenCipher", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/admin/tokenCipher")>()),
   getTokenCipher: () => next.cipher,
+}));
+vi.mock("@/lib/admin/gmailApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/admin/gmailApi")>()),
+  getGmailClient: () => next.gmail,
 }));
 
 function jar() {
@@ -83,6 +91,7 @@ beforeEach(() => {
   jar().clear();
   next.google = null;
   next.cipher = null;
+  next.gmail = null;
   logs = [];
   for (const method of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
@@ -555,6 +564,328 @@ describe("Gmail actions", () => {
       "[admin] Gmail connection check failed (Error).",
       "[admin] Gmail disconnect failed (Error).",
     ]);
+  });
+});
+
+describe("mail actions", () => {
+  async function mailSetup() {
+    const { store, owner, ownerToken } = await seedOwner();
+    const alice = await seedUser(store, owner, "alice@example.com");
+    const bob = await seedUser(store, owner, "bob@example.com");
+    const cipher = createLocalTokenCipher();
+    const { identity } = await seedConnectedSender(
+      store,
+      cipher,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    const google = createFakeGoogle({ issuedAt: new Date() });
+    const gmail = createFakeGmail();
+    next.store = store;
+    next.google = google.client;
+    next.cipher = cipher;
+    next.gmail = gmail.client;
+    return { store, owner, ownerToken, alice, bob, identity, gmail };
+  }
+
+  function compose(values: Record<string, string>) {
+    return form({
+      operationId: newOperationId(new Date()),
+      subject: "Hello",
+      body: "Hi there",
+      ...values,
+    });
+  }
+
+  it("requires a session for every mail action", async () => {
+    await mailSetup();
+    const attempts = [
+      actions.saveContactAction(idleFormState, form({})),
+      actions.deleteContactAction(form({})),
+      actions.saveTemplateAction(idleFormState, form({})),
+      actions.deleteTemplateAction(form({})),
+      actions.sendEmailAction(
+        { status: "idle", operationId: "" },
+        compose({ emails: "x@example.com" }),
+      ),
+      actions.updateUserSettingsAction(idleFormState, form({})),
+    ];
+    for (const attempt of attempts) {
+      expect(await navigation(attempt)).toBe("/admin/login");
+    }
+  });
+
+  it("saves contacts and templates for the signed-in user, not a userId in the form", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    expect(
+      await actions.saveContactAction(
+        idleFormState,
+        form({
+          name: "Rahul",
+          email: "Rahul@Example.com",
+          userId: context.bob.user.id,
+        }),
+      ),
+    ).toMatchObject({ status: "success" });
+    expect(
+      await actions.saveTemplateAction(
+        idleFormState,
+        form({
+          name: "Hello",
+          subject: "Hi {{name}}",
+          body: "Hello {{name}}",
+          userId: context.bob.user.id,
+        }),
+      ),
+    ).toMatchObject({ status: "success" });
+
+    expect(await context.store.listContacts(context.bob.user.id)).toEqual([]);
+    expect(await context.store.listTemplates(context.bob.user.id)).toEqual([]);
+    expect(await context.store.listContacts(context.alice.user.id)).toEqual([
+      expect.objectContaining({ email: "rahul@example.com" }),
+    ]);
+  });
+
+  it("cannot edit or delete another user's contact or template", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    await actions.saveContactAction(
+      idleFormState,
+      form({ name: "Rahul", email: "rahul@example.com" }),
+    );
+    await actions.saveTemplateAction(
+      idleFormState,
+      form({ name: "Hello", subject: "Hi", body: "Hello" }),
+    );
+    const [contact] = await context.store.listContacts(context.alice.user.id);
+    const [template] = await context.store.listTemplates(context.alice.user.id);
+
+    signIn(context.bob.token);
+    expect(
+      await actions.saveContactAction(
+        idleFormState,
+        form({ contactId: contact.id, name: "Bob's", email: "b@example.com" }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      message: "That contact was not found.",
+    });
+    expect(
+      await actions.saveTemplateAction(
+        idleFormState,
+        form({ templateId: template.id, name: "X", subject: "X", body: "X" }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      message: "That template was not found.",
+    });
+    await actions.deleteContactAction(form({ contactId: contact.id }));
+    await actions.deleteTemplateAction(form({ templateId: template.id }));
+
+    expect(
+      await context.store.getContact(context.alice.user.id, contact.id),
+    ).toEqual(contact);
+    expect(
+      await context.store.getTemplate(context.alice.user.id, template.id),
+    ).toEqual(template);
+  });
+
+  it("rejects a template with an unknown placeholder", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    const state = await actions.saveTemplateAction(
+      idleFormState,
+      form({ name: "Bad", subject: "Hi {{first_name}}", body: "Hello" }),
+    );
+    expect(state.status).toBe("error");
+    expect(state.fieldErrors?.subject).toMatch(/first_name/);
+    expect(await context.store.listTemplates(context.alice.user.id)).toEqual(
+      [],
+    );
+  });
+
+  it("sends from the user's own identity, ignoring From and userId fields", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    const operationId = newOperationId(new Date());
+    const state = await actions.sendEmailAction(
+      { status: "idle", operationId },
+      compose({
+        operationId,
+        senderIdentityId: context.identity.id,
+        emails: "rahul@example.com",
+        from: "ceo@example.com",
+        userId: context.bob.user.id,
+      }),
+    );
+
+    expect(state).toMatchObject({
+      status: "success",
+      message: "Sent 1 email.",
+    });
+    expect(state.operationId).not.toBe(operationId);
+    const [message] = context.gmail.messages();
+    expect(message.headers.From).toBe("alice@gmail.com");
+    expect(message.headers.To).toBe("rahul@example.com");
+    expect(
+      await context.store.listRecentSendRecords(context.alice.user.id, 10),
+    ).toHaveLength(1);
+    expect(
+      await context.store.listRecentSendRecords(context.bob.user.id, 10),
+    ).toEqual([]);
+  });
+
+  it("refuses to send from another user's identity", async () => {
+    const context = await mailSetup();
+    signIn(context.bob.token);
+    const state = await actions.sendEmailAction(
+      { status: "idle", operationId: "" },
+      compose({
+        senderIdentityId: context.identity.id,
+        emails: "rahul@example.com",
+      }),
+    );
+    expect(state.status).toBe("error");
+    expect(context.gmail.calls).toHaveLength(0);
+  });
+
+  it("keeps the operation ID when a send is refused or invalid", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    const operationId = newOperationId(new Date());
+    const invalid = await actions.sendEmailAction(
+      { status: "idle", operationId },
+      form({ operationId, senderIdentityId: context.identity.id }),
+    );
+    expect(invalid).toMatchObject({ status: "error", operationId });
+    expect(invalid.fieldErrors?.recipients).toBeDefined();
+
+    const stale = await actions.sendEmailAction(
+      { status: "idle", operationId },
+      compose({
+        operationId: "forged",
+        senderIdentityId: context.identity.id,
+        emails: "rahul@example.com",
+      }),
+    );
+    expect(stale).toMatchObject({ status: "error", operationId });
+    expect(context.gmail.calls).toHaveLength(0);
+  });
+
+  it("does not send twice when the same form is submitted again", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    const operationId = newOperationId(new Date());
+    const submit = () =>
+      actions.sendEmailAction(
+        { status: "idle", operationId },
+        compose({
+          operationId,
+          senderIdentityId: context.identity.id,
+          emails: "rahul@example.com",
+        }),
+      );
+    await submit();
+    const again = await submit();
+    expect(again.results).toEqual([
+      expect.objectContaining({ status: "ALREADY_SENT" }),
+    ]);
+    expect(context.gmail.calls).toHaveLength(1);
+  });
+
+  it("reports an unconfigured server without sending", async () => {
+    const context = await mailSetup();
+    next.google = null;
+    signIn(context.alice.token);
+    expect(
+      await actions.sendEmailAction(
+        { status: "idle", operationId: "" },
+        compose({
+          senderIdentityId: context.identity.id,
+          emails: "rahul@example.com",
+        }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      message: "Gmail is not configured on this server. Nothing was sent.",
+    });
+    expect(context.gmail.calls).toHaveLength(0);
+  });
+
+  it("lets only the OWNER change sending settings", async () => {
+    const context = await mailSetup();
+    const settings = form({
+      userId: context.alice.user.id,
+      sendingEnabled: "on",
+      dailyTotalEmails: "500",
+      dailyBulkRecipients: "500",
+      maxBulkRecipientsPerOperation: "20",
+    });
+
+    signIn(context.alice.token);
+    expect(
+      await actions.updateUserSettingsAction(idleFormState, settings),
+    ).toMatchObject({
+      status: "error",
+      message: "Only the owner can change sending settings.",
+    });
+    expect(
+      await context.store.getUserSettings(context.alice.user.id),
+    ).toBeNull();
+
+    signIn(context.ownerToken);
+    expect(
+      await actions.updateUserSettingsAction(idleFormState, settings),
+    ).toMatchObject({ status: "success" });
+    expect(
+      await context.store.getUserSettings(context.alice.user.id),
+    ).toMatchObject({
+      sendingEnabled: true,
+      bulkSendingEnabled: false,
+      dailyTotalEmails: 500,
+      updatedBy: context.owner.id,
+    });
+  });
+
+  it("never returns or logs tokens or message bodies", async () => {
+    const context = await mailSetup();
+    signIn(context.alice.token);
+    const body = "Private body text";
+    const states: unknown[] = [
+      await actions.sendEmailAction(
+        { status: "idle", operationId: "" },
+        compose({
+          senderIdentityId: context.identity.id,
+          emails: "rahul@example.com",
+          body,
+        }),
+      ),
+    ];
+    next.store = {
+      ...context.store,
+      listSendRecordsForOperation: async () => {
+        throw new Error(`leak ${refreshToken} ${accessToken} ${body}`);
+      },
+    };
+    states.push(
+      await actions.sendEmailAction(
+        { status: "idle", operationId: "" },
+        compose({
+          senderIdentityId: context.identity.id,
+          emails: "other@example.com",
+          body,
+        }),
+      ),
+    );
+
+    const output = JSON.stringify(states) + logs.join("\n");
+    expect(output).not.toContain(refreshToken);
+    expect(output).not.toContain(accessToken);
+    expect(output).not.toContain(body);
+    expect(output).not.toMatch(/ciphertext|encryptedDataKey/);
+    expect(logs).toEqual(["[admin] Send failed (Error)."]);
   });
 });
 

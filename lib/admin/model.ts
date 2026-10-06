@@ -231,3 +231,97 @@ export function toPublicGmailConnection(
     disconnectedAt: connection.disconnectedAt,
   };
 }
+
+/**
+ * Per-user feature switches and application sending limits, set by the
+ * OWNER. A user without a stored record gets `defaultUserSettings`
+ * (`lib/admin/settings.ts`). These are the console's own safety limits, not
+ * Google's Gmail quotas.
+ */
+export type UserSettings = {
+  userId: string;
+  sendingEnabled: boolean;
+  bulkSendingEnabled: boolean;
+  templatesEnabled: boolean;
+  contactsEnabled: boolean;
+  /** Emails per UTC day, individual and bulk together. */
+  dailyTotalEmails: number;
+  /** Recipients of bulk sends per UTC day. */
+  dailyBulkRecipients: number;
+  maxBulkRecipientsPerOperation: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
+/** A recipient saved by one user; never visible to anyone else. */
+export type Contact = {
+  id: string;
+  userId: string;
+  name: string;
+  /** Normalized with `normalizeEmail`; unique per user. */
+  email: string;
+  company: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EmailTemplate = {
+  id: string;
+  userId: string;
+  name: string;
+  subject: string;
+  /** Plain text; may contain `{{name}}`, `{{email}}`, `{{company}}`. */
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * RESERVED: counted against the daily limits, Gmail not yet answered.
+ * SENT: Gmail accepted it. FAILED: Gmail did not take it; the reservation is
+ * released. UNCERTAIN: the request may have reached Gmail (timeout, network
+ * error, 5xx); it stays counted and is never retried automatically.
+ */
+export type SendStatus = "RESERVED" | "SENT" | "FAILED" | "UNCERTAIN";
+
+export type SendFailureCode =
+  | "not-connected"
+  | "reauth-required"
+  | "gmail-auth-failed"
+  | "gmail-rejected"
+  | "gmail-rate-limited"
+  | "gmail-unavailable"
+  | "not-attempted";
+
+/**
+ * One message to one recipient. Its ID is derived from the operation ID and
+ * the recipient, so repeating an operation finds the same record instead of
+ * sending again. The body is never stored.
+ */
+export type SendRecord = {
+  /** `<operationId>:<recipient hash>`. */
+  id: string;
+  userId: string;
+  operationId: string;
+  senderIdentityId: string;
+  gmailConnectionId: string;
+  senderEmail: string;
+  recipient: string;
+  /** The personalized subject as sent. */
+  subject: string;
+  templateId: string | null;
+  /** Part of an operation with more than one recipient. */
+  bulk: boolean;
+  /** UTC day (`YYYY-MM-DD`) whose counters this send was reserved against. */
+  quotaDay: string;
+  status: SendStatus;
+  attempts: number;
+  gmailMessageId: string | null;
+  failureCode: SendFailureCode | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+export type DailyUsage = { total: number; bulk: number };

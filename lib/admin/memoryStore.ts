@@ -1,12 +1,17 @@
 import {
+  type Contact,
   countUsedSeats,
+  type DailyUsage,
   effectiveInvitationStatus,
+  type EmailTemplate,
   type GmailConnection,
   type Invitation,
   type OAuthState,
+  type SendRecord,
   type SenderIdentity,
   type Session,
   type User,
+  type UserSettings,
 } from "@/lib/admin/model";
 import type { AdminStore } from "@/lib/admin/store";
 
@@ -27,8 +32,23 @@ export function createMemoryStore(): AdminStore {
   const senders = new Map<string, SenderIdentity>();
   const oauthStates = new Map<string, OAuthState>();
   const gmailConnections = new Map<string, GmailConnection>();
+  const settings = new Map<string, UserSettings>();
+  /** Keyed by `<userId> <id>`, like the DynamoDB per-user partitions. */
+  const contacts = new Map<string, Contact>();
+  const templates = new Map<string, EmailTemplate>();
+  const sends = new Map<string, SendRecord>();
+  const usage = new Map<string, DailyUsage>();
 
   const copy = <T>(value: T): T => structuredClone(value);
+  const owned = (userId: string, id: string) => `${userId} ${id}`;
+  const contactsOf = (userId: string) =>
+    [...contacts.values()].filter((contact) => contact.userId === userId);
+  const emailTaken = (userId: string, email: string, exceptId?: string) =>
+    contactsOf(userId).some(
+      (contact) => contact.email === email && contact.id !== exceptId,
+    );
+  const usageOf = (userId: string, day: string) =>
+    usage.get(owned(userId, day)) ?? { total: 0, bulk: 0 };
   const findUserByEmail = (email: string) =>
     [...users.values()].find((user) => user.email === email);
 
@@ -222,6 +242,146 @@ export function createMemoryStore(): AdminStore {
 
     async saveGmailConnection(connection) {
       gmailConnections.set(connection.senderIdentityId, copy(connection));
+    },
+
+    async getUserSettings(userId) {
+      const stored = settings.get(userId);
+      return stored ? copy(stored) : null;
+    },
+
+    async saveUserSettings(value) {
+      settings.set(value.userId, copy(value));
+    },
+
+    async listContacts(userId) {
+      return contactsOf(userId).map(copy);
+    },
+
+    async getContact(userId, contactId) {
+      const contact = contacts.get(owned(userId, contactId));
+      return contact ? copy(contact) : null;
+    },
+
+    async createContact(contact) {
+      const key = owned(contact.userId, contact.id);
+      if (contacts.has(key) || emailTaken(contact.userId, contact.email)) {
+        return "duplicate";
+      }
+      contacts.set(key, copy(contact));
+      return "saved";
+    },
+
+    async updateContact(contact, previousEmail) {
+      const key = owned(contact.userId, contact.id);
+      const existing = contacts.get(key);
+      if (!existing || existing.email !== previousEmail) return "not-found";
+      if (emailTaken(contact.userId, contact.email, contact.id)) {
+        return "duplicate";
+      }
+      contacts.set(key, copy(contact));
+      return "saved";
+    },
+
+    async deleteContact(userId, contactId, email) {
+      const key = owned(userId, contactId);
+      if (contacts.get(key)?.email !== email) return false;
+      contacts.delete(key);
+      return true;
+    },
+
+    async listTemplates(userId) {
+      return [...templates.values()]
+        .filter((template) => template.userId === userId)
+        .map(copy);
+    },
+
+    async getTemplate(userId, templateId) {
+      const template = templates.get(owned(userId, templateId));
+      return template ? copy(template) : null;
+    },
+
+    async createTemplate(template) {
+      templates.set(owned(template.userId, template.id), copy(template));
+    },
+
+    async updateTemplate(template) {
+      const key = owned(template.userId, template.id);
+      if (!templates.has(key)) return false;
+      templates.set(key, copy(template));
+      return true;
+    },
+
+    async deleteTemplate(userId, templateId) {
+      return templates.delete(owned(userId, templateId));
+    },
+
+    async getDailyUsage(userId, day) {
+      return copy(usageOf(userId, day));
+    },
+
+    async reserveSends({ userId, day, bulk, limits, create, retry }) {
+      const count = create.length + retry.length;
+      const current = usageOf(userId, day);
+      if (
+        current.total + count > limits.dailyTotalEmails ||
+        (bulk && current.bulk + count > limits.dailyBulkRecipients)
+      ) {
+        return "limit";
+      }
+      const conflict =
+        create.some((record) => sends.has(owned(userId, record.id))) ||
+        retry.some(
+          (record) => sends.get(owned(userId, record.id))?.status !== "FAILED",
+        );
+      if (conflict) return "conflict";
+
+      usage.set(owned(userId, day), {
+        total: current.total + count,
+        bulk: current.bulk + (bulk ? count : 0),
+      });
+      for (const record of [...create, ...retry]) {
+        sends.set(owned(userId, record.id), copy(record));
+      }
+      return "reserved";
+    },
+
+    async finishSend(record, completion) {
+      const key = owned(record.userId, record.id);
+      const stored = sends.get(key);
+      if (!stored || stored.status !== "RESERVED") return false;
+      stored.status = completion.status;
+      stored.updatedAt = completion.at;
+      stored.completedAt = completion.at;
+      if (completion.status === "SENT") {
+        stored.gmailMessageId = completion.gmailMessageId;
+      } else {
+        stored.failureCode = completion.failureCode;
+      }
+      if (completion.status === "FAILED") {
+        const current = usageOf(stored.userId, stored.quotaDay);
+        usage.set(owned(stored.userId, stored.quotaDay), {
+          total: current.total - 1,
+          bulk: current.bulk - (stored.bulk ? 1 : 0),
+        });
+      }
+      return true;
+    },
+
+    async listSendRecordsForOperation(userId, operationId) {
+      return [...sends.values()]
+        .filter(
+          (record) =>
+            record.userId === userId && record.operationId === operationId,
+        )
+        .map(copy);
+    },
+
+    async listRecentSendRecords(userId, limit) {
+      return [...sends.values()]
+        .filter((record) => record.userId === userId)
+        .sort((a, b) => b.id.localeCompare(a.id))
+        .slice(0, limit)
+        .map(copy);
     },
   };
 }

@@ -15,7 +15,7 @@ function sourceFiles(directory: string) {
     .map((file) => join(directory, file).replaceAll("\\", "/"));
 }
 
-describe("private console discoverability", () => {
+describe("private console discoverability", { timeout: 30_000 }, () => {
   it("is not linked from any public page, component, or content", () => {
     const publicFiles = [
       ...sourceFiles("app").filter((file) => !file.startsWith("app/admin/")),

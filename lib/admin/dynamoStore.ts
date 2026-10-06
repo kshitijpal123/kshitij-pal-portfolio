@@ -10,16 +10,29 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
+  type Contact,
   countUsedSeats,
+  type DailyUsage,
   effectiveInvitationStatus,
+  type EmailTemplate,
   type GmailConnection,
   type Invitation,
   type OAuthState,
+  type SendRecord,
   type SenderIdentity,
   type Session,
   type User,
+  type UserSettings,
 } from "@/lib/admin/model";
 import type { AdminStore } from "@/lib/admin/store";
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** Send records are kept for traceability for this long, then expire. */
+export const sendRecordRetentionMs = 90 * dayMs;
+
+/** Daily counters outlive their day briefly, so late releases still apply. */
+const usageRetentionMs = 8 * dayMs;
 
 /**
  * Single-table layout (partition key `pk`, sort key `sk`). Every collection
@@ -38,6 +51,18 @@ import type { AdminStore } from "@/lib/admin/store";
  * | SENDER_EMAIL | email       | `identityId`: one claimant per address    |
  * | OAUTH_STATE  | state hash  | OAuthState, `expiresAtEpoch` (TTL)        |
  * | GMAIL        | identity id | GmailConnection (encrypted credentials)   |
+ * | SETTINGS     | user id     | UserSettings                              |
+ *
+ * Mail data (M3) is partitioned per user, so the key itself scopes every
+ * read and write to its owner:
+ *
+ * | pk                     | sk          | Holds                            |
+ * | ---------------------- | ----------- | -------------------------------- |
+ * | CONTACT#<userId>       | contact id  | Contact                          |
+ * | CONTACT_EMAIL#<userId> | email       | `contactId`: unique per user     |
+ * | TEMPLATE#<userId>      | template id | EmailTemplate                    |
+ * | QUOTA#<userId>         | UTC day     | `total`, `bulk` counters (TTL)   |
+ * | SEND#<userId>          | send id     | SendRecord, `expiresAtEpoch`     |
  *
  * Reads that decide authorization are strongly consistent.
  */
@@ -53,6 +78,21 @@ const keys = {
   senderEmail: (email: string) => ({ pk: "SENDER_EMAIL", sk: email }),
   oauthState: (stateHash: string) => ({ pk: "OAUTH_STATE", sk: stateHash }),
   gmail: (senderIdentityId: string) => ({ pk: "GMAIL", sk: senderIdentityId }),
+  settings: (userId: string) => ({ pk: "SETTINGS", sk: userId }),
+  contact: (userId: string, id: string) => ({
+    pk: `CONTACT#${userId}`,
+    sk: id,
+  }),
+  contactEmail: (userId: string, email: string) => ({
+    pk: `CONTACT_EMAIL#${userId}`,
+    sk: email,
+  }),
+  template: (userId: string, id: string) => ({
+    pk: `TEMPLATE#${userId}`,
+    sk: id,
+  }),
+  quota: (userId: string, day: string) => ({ pk: `QUOTA#${userId}`, sk: day }),
+  send: (userId: string, id: string) => ({ pk: `SEND#${userId}`, sk: id }),
 };
 
 const notExists = "attribute_not_exists(pk)";
@@ -66,6 +106,10 @@ function strip<T>(item: Item | undefined): T | null {
   delete rest.sk;
   delete rest.expiresAtEpoch;
   return rest as T;
+}
+
+function counterNames(bulk: boolean): Record<string, string> {
+  return bulk ? { "#total": "total", "#bulk": "bulk" } : { "#total": "total" };
 }
 
 function epochSeconds(iso: string | number) {
@@ -149,6 +193,41 @@ export function createDynamoStore(
     >,
   ) {
     await client.send(new TransactWriteCommand({ TransactItems: items }));
+  }
+
+  /** Send records of one user; with a `Limit`, only the first page. */
+  async function querySends(
+    userId: string,
+    query: Pick<
+      QueryCommandInput,
+      | "KeyConditionExpression"
+      | "ExpressionAttributeValues"
+      | "ScanIndexForward"
+      | "Limit"
+    >,
+  ) {
+    const records: SendRecord[] = [];
+    let ExclusiveStartKey: Item | undefined;
+    do {
+      const page = await client.send(
+        new QueryCommand({
+          TableName,
+          ConsistentRead: true,
+          ExclusiveStartKey,
+          ...query,
+          ExpressionAttributeValues: {
+            ":pk": `SEND#${userId}`,
+            ...query.ExpressionAttributeValues,
+          },
+        }),
+      );
+      for (const item of page.Items ?? []) {
+        const record = strip<SendRecord>(item);
+        if (record) records.push(record);
+      }
+      ExclusiveStartKey = query.Limit ? undefined : page.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+    return records;
   }
 
   return {
@@ -587,6 +666,311 @@ export function createDynamoStore(
           Item: { ...keys.gmail(connection.senderIdentityId), ...connection },
         }),
       );
+    },
+
+    getUserSettings(userId) {
+      return get<UserSettings>(keys.settings(userId));
+    },
+
+    async saveUserSettings(settings) {
+      await client.send(
+        new PutCommand({
+          TableName,
+          Item: { ...keys.settings(settings.userId), ...settings },
+        }),
+      );
+    },
+
+    listContacts(userId) {
+      return queryAll<Contact>(`CONTACT#${userId}`);
+    },
+
+    getContact(userId, contactId) {
+      return get<Contact>(keys.contact(userId, contactId));
+    },
+
+    async createContact(contact) {
+      try {
+        await transact([
+          {
+            Put: {
+              TableName,
+              Item: { ...keys.contact(contact.userId, contact.id), ...contact },
+              ConditionExpression: notExists,
+            },
+          },
+          {
+            Put: {
+              TableName,
+              Item: {
+                ...keys.contactEmail(contact.userId, contact.email),
+                contactId: contact.id,
+              },
+              ConditionExpression: notExists,
+            },
+          },
+        ]);
+        return "saved";
+      } catch (error) {
+        if (failedConditions(error)) return "duplicate";
+        throw error;
+      }
+    },
+
+    async updateContact(contact, previousEmail) {
+      const put = {
+        Put: {
+          TableName,
+          Item: { ...keys.contact(contact.userId, contact.id), ...contact },
+          ConditionExpression: "attribute_exists(pk) AND email = :previous",
+          ExpressionAttributeValues: { ":previous": previousEmail },
+        },
+      };
+      try {
+        if (contact.email === previousEmail) {
+          await transact([put]);
+        } else {
+          await transact([
+            put,
+            {
+              Delete: {
+                TableName,
+                Key: keys.contactEmail(contact.userId, previousEmail),
+                ConditionExpression: "contactId = :id",
+                ExpressionAttributeValues: { ":id": contact.id },
+              },
+            },
+            {
+              Put: {
+                TableName,
+                Item: {
+                  ...keys.contactEmail(contact.userId, contact.email),
+                  contactId: contact.id,
+                },
+                ConditionExpression: notExists,
+              },
+            },
+          ]);
+        }
+        return "saved";
+      } catch (error) {
+        const failed = failedConditions(error);
+        if (!failed) throw error;
+        return failed[2] && !failed[0] ? "duplicate" : "not-found";
+      }
+    },
+
+    async deleteContact(userId, contactId, email) {
+      try {
+        await transact([
+          {
+            Delete: {
+              TableName,
+              Key: keys.contact(userId, contactId),
+              ConditionExpression: "attribute_exists(pk) AND email = :email",
+              ExpressionAttributeValues: { ":email": email },
+            },
+          },
+          {
+            Delete: {
+              TableName,
+              Key: keys.contactEmail(userId, email),
+              ConditionExpression: `${notExists} OR contactId = :id`,
+              ExpressionAttributeValues: { ":id": contactId },
+            },
+          },
+        ]);
+        return true;
+      } catch (error) {
+        if (failedConditions(error)) return false;
+        throw error;
+      }
+    },
+
+    listTemplates(userId) {
+      return queryAll<EmailTemplate>(`TEMPLATE#${userId}`);
+    },
+
+    getTemplate(userId, templateId) {
+      return get<EmailTemplate>(keys.template(userId, templateId));
+    },
+
+    async createTemplate(template) {
+      await client.send(
+        new PutCommand({
+          TableName,
+          Item: { ...keys.template(template.userId, template.id), ...template },
+          ConditionExpression: notExists,
+        }),
+      );
+    },
+
+    async updateTemplate(template) {
+      try {
+        await client.send(
+          new PutCommand({
+            TableName,
+            Item: {
+              ...keys.template(template.userId, template.id),
+              ...template,
+            },
+            ConditionExpression: "attribute_exists(pk)",
+          }),
+        );
+        return true;
+      } catch (error) {
+        if (isConditionFailure(error)) return false;
+        throw error;
+      }
+    },
+
+    async deleteTemplate(userId, templateId) {
+      const { Attributes } = await client.send(
+        new DeleteCommand({
+          TableName,
+          Key: keys.template(userId, templateId),
+          ReturnValues: "ALL_OLD",
+        }),
+      );
+      return Attributes !== undefined;
+    },
+
+    async getDailyUsage(userId, day) {
+      const counters = await get<Partial<DailyUsage>>(keys.quota(userId, day));
+      return { total: counters?.total ?? 0, bulk: counters?.bulk ?? 0 };
+    },
+
+    /*
+     * One transaction: the counter update is conditional on the limits
+     * (`count <= limit - n`, so the result never exceeds the limit), each new
+     * record on not existing, and each retried record on still being FAILED.
+     * If any condition fails, nothing is written.
+     */
+    async reserveSends({ userId, day, bulk, limits, create, retry }) {
+      const count = create.length + retry.length;
+      const totalCeiling = limits.dailyTotalEmails - count;
+      const bulkCeiling = limits.dailyBulkRecipients - count;
+      if (count === 0) return "reserved";
+      if (totalCeiling < 0 || (bulk && bulkCeiling < 0)) return "limit";
+
+      const ttl = epochSeconds(
+        Date.parse(`${day}T00:00:00.000Z`) + usageRetentionMs,
+      );
+      const counter = {
+        Update: {
+          TableName,
+          Key: keys.quota(userId, day),
+          UpdateExpression: bulk
+            ? "SET expiresAtEpoch = :ttl ADD #total :count, #bulk :count"
+            : "SET expiresAtEpoch = :ttl ADD #total :count",
+          ConditionExpression: bulk
+            ? "(attribute_not_exists(#total) OR #total <= :totalCeiling) AND (attribute_not_exists(#bulk) OR #bulk <= :bulkCeiling)"
+            : "attribute_not_exists(#total) OR #total <= :totalCeiling",
+          ExpressionAttributeNames: counterNames(bulk),
+          ExpressionAttributeValues: {
+            ":ttl": ttl,
+            ":count": count,
+            ":totalCeiling": totalCeiling,
+            ...(bulk ? { ":bulkCeiling": bulkCeiling } : {}),
+          },
+        },
+      };
+      const item = (record: SendRecord) => ({
+        ...keys.send(userId, record.id),
+        ...record,
+        expiresAtEpoch: epochSeconds(
+          Date.parse(record.createdAt) + sendRecordRetentionMs,
+        ),
+      });
+
+      try {
+        await transact([
+          counter,
+          ...create.map((record) => ({
+            Put: {
+              TableName,
+              Item: item(record),
+              ConditionExpression: notExists,
+            },
+          })),
+          ...retry.map((record) => ({
+            Put: {
+              TableName,
+              Item: item(record),
+              ConditionExpression: "#status = :failed",
+              ExpressionAttributeNames: { "#status": "status" },
+              ExpressionAttributeValues: { ":failed": "FAILED" },
+            },
+          })),
+        ]);
+        return "reserved";
+      } catch (error) {
+        const failed = failedConditions(error);
+        if (!failed) throw error;
+        return failed[0] ? "limit" : "conflict";
+      }
+    },
+
+    async finishSend(record, completion) {
+      const update = {
+        TableName,
+        Key: keys.send(record.userId, record.id),
+        UpdateExpression:
+          completion.status === "SENT"
+            ? "SET #status = :status, gmailMessageId = :result, updatedAt = :at, completedAt = :at"
+            : "SET #status = :status, failureCode = :result, updatedAt = :at, completedAt = :at",
+        ConditionExpression: "#status = :reserved",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":status": completion.status,
+          ":result":
+            completion.status === "SENT"
+              ? completion.gmailMessageId
+              : completion.failureCode,
+          ":at": completion.at,
+          ":reserved": "RESERVED",
+        },
+      };
+      try {
+        if (completion.status === "FAILED") {
+          // A failed send gives its reservation back in the same step.
+          await transact([
+            { Update: update },
+            {
+              Update: {
+                TableName,
+                Key: keys.quota(record.userId, record.quotaDay),
+                UpdateExpression: record.bulk
+                  ? "ADD #total :release, #bulk :release"
+                  : "ADD #total :release",
+                ExpressionAttributeNames: counterNames(record.bulk),
+                ExpressionAttributeValues: { ":release": -1 },
+              },
+            },
+          ]);
+        } else {
+          await client.send(new UpdateCommand(update));
+        }
+        return true;
+      } catch (error) {
+        if (isConditionFailure(error) || failedConditions(error)) return false;
+        throw error;
+      }
+    },
+
+    listSendRecordsForOperation(userId, operationId) {
+      return querySends(userId, {
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :operation)",
+        ExpressionAttributeValues: { ":operation": `${operationId}:` },
+      });
+    },
+
+    listRecentSendRecords(userId, limit) {
+      return querySends(userId, {
+        KeyConditionExpression: "pk = :pk",
+        ScanIndexForward: false,
+        Limit: limit,
+      });
     },
   };
 }

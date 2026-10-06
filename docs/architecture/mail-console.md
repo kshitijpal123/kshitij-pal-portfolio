@@ -1,14 +1,14 @@
 # Private Mail Console
 
-Status: Milestone 2 of the console. Milestone 1 (foundation) built
+Status: Milestone 3 of the console. Milestone 1 (foundation) built
 authentication, users, roles, invitations, the five-user limit, the OWNER
-bootstrap, and sender identity approval. Milestone 2 adds Gmail account
-connection through Google OAuth (see "Gmail connection"). Nothing sends
-email yet.
+bootstrap, and sender identity approval. Milestone 2 added Gmail account
+connection through Google OAuth (see "Gmail connection"). Milestone 3 adds
+contacts, templates, and explicit individual and bulk sending through the
+connected Gmail accounts (see "Contacts and templates" and "Sending").
 
 Approved sender identity does not mean Gmail authorization, and Gmail
-authorization does not mean approval. Sending (a later milestone) needs
-both.
+authorization does not mean approval. Sending needs both.
 
 ## Purpose
 
@@ -37,7 +37,10 @@ untouched.
 | Sign in, see own profile, sign out             | Yes   | Yes  |
 | Request a sender identity, see own requests    | Yes   | Yes  |
 | Connect, check, disconnect own Gmail accounts  | Yes   | Yes  |
+| Manage own contacts and templates              | Yes   | Yes  |
+| Send from own approved, connected addresses    | Yes   | Yes  |
 | See all users, invitations, and seat usage     | Yes   | No   |
+| Set each user's feature switches and limits    | Yes   | No   |
 | Invite and revoke invitations                  | Yes   | No   |
 | Disable and re-enable USERs                    | Yes   | No   |
 | Approve, reject, and disable sender identities | Yes   | No   |
@@ -55,9 +58,12 @@ itself, and USER-status changes never apply to the OWNER.
 | `/admin/login`          | Anyone                           | Sign in (redirects to `/admin` if signed in)          |
 | `/admin/setup`          | Anyone, only while bootstrapping | Create the OWNER; 404 otherwise (signed in: `/admin`) |
 | `/admin/invite/[token]` | Holder of an open invitation     | Choose a name and password                            |
-| `/admin/users`          | OWNER                            | Seats, users, invitations, invite form                |
+| `/admin/users`          | OWNER                            | Seats, users, invitations, invite form, user settings |
 | `/admin/senders`        | Signed in                        | Request and track own sender identities               |
 | `/admin/approvals`      | OWNER                            | Review sender identity requests                       |
+| `/admin/compose`        | Signed in                        | Compose, preview, send; today's limits; recent sends  |
+| `/admin/contacts`       | Signed in                        | Own contacts: add, edit, delete, search (`?q=`)       |
+| `/admin/templates`      | Signed in                        | Own templates: add, edit, delete                      |
 
 `/admin/oauth/google/callback` is a Route Handler, not a page: Google
 redirects the browser there after consent (see "Gmail connection").
@@ -72,8 +78,8 @@ the edge.
 ```
 app/admin/           Routing files only (layout sets noindex)
   oauth/google/callback/route.ts   Google's OAuth redirect target
-components/admin/    Console UI; the five forms and GmailConnectButton are
-                     the only Client Components
+components/admin/    Console UI; the forms and GmailConnectButton are the
+                     only Client Components
 lib/admin/
   model.ts           Types, limits, seat counting, public projections
   validation.ts      Form parsing and validation (server side)
@@ -91,6 +97,14 @@ lib/admin/
   tokenCipher.ts     KMS envelope encryption of stored refresh tokens
   gmailConnections.ts  Connect, callback, refresh, check, disconnect, and
                      the getGmailAccessToken sending gate
+  settings.ts        Per-user feature switches and sending limits
+  contacts.ts        Own contacts: list, search, create, update, delete
+  templates.ts       Own templates: list, create, update, delete
+  personalization.ts Placeholder parsing and substitution (also used by the
+                     compose preview in the browser)
+  mimeMessage.ts     RFC 2822 / MIME message building, base64url encoding
+  gmailApi.ts        Gmail users.messages.send client and error classes
+  sending.ts         The send flow: checks, reservation, Gmail calls, results
   session.ts         Cookies and requireUser / requireOwner (request scope)
   actions.ts         Server Actions: thin wrappers over the modules above
 ```
@@ -111,9 +125,11 @@ domain function, and translate the result into a message or redirect.
 - **User isolation.** A USER can read only their own profile and sender
   identities. Listing users, invitations, or other people's identities is
   OWNER-only in the domain modules (they return `null` or `forbidden` for
-  anyone else), not only in the pages. Future mail data must keep this
-  invariant: every query is scoped to the actor unless the actor is the
-  OWNER and the operation is administrative.
+  anyone else), not only in the pages. Mail data keeps this invariant:
+  contacts, templates, send records, and daily counters live in partitions
+  keyed by the owning user's ID, and every read or write builds that key
+  from the session's user. The OWNER has no view of other users' contacts,
+  templates, or sends either; administration is limited to settings.
 
 ## Passwords
 
@@ -160,19 +176,30 @@ One DynamoDB table, `<stack>-admin` (on-demand, point-in-time recovery,
 deletion protection, retained if the stack is deleted). Single-table
 layout, keyed by `pk` and `sk`:
 
-| `pk`           | `sk`        | Item                                         |
-| -------------- | ----------- | -------------------------------------------- |
-| `USER`         | user ID     | User (including the password hash)           |
-| `USER_EMAIL`   | email       | Unique-email lock                            |
-| `META`         | `OWNER`     | The single-OWNER lock                        |
-| `META`         | `SEATS`     | Version counter for the five-seat limit      |
-| `INVITATION`   | ID          | Invitation (token hash only)                 |
-| `SESSION`      | token hash  | Session; `expiresAtEpoch` TTL                |
-| `ATTEMPT`      | key         | Failed-attempt window; `expiresAtEpoch` TTL  |
-| `SENDER`       | ID          | Sender identity                              |
-| `SENDER_EMAIL` | email       | One active claimant per sender address       |
-| `OAUTH_STATE`  | state hash  | Pending Google consent; `expiresAtEpoch` TTL |
-| `GMAIL`        | identity ID | Gmail connection (encrypted credential)      |
+| `pk`           | `sk`        | Item                                          |
+| -------------- | ----------- | --------------------------------------------- |
+| `USER`         | user ID     | User (including the password hash)            |
+| `USER_EMAIL`   | email       | Unique-email lock                             |
+| `META`         | `OWNER`     | The single-OWNER lock                         |
+| `META`         | `SEATS`     | Version counter for the five-seat limit       |
+| `INVITATION`   | ID          | Invitation (token hash only)                  |
+| `SESSION`      | token hash  | Session; `expiresAtEpoch` TTL                 |
+| `ATTEMPT`      | key         | Failed-attempt window; `expiresAtEpoch` TTL   |
+| `SENDER`       | ID          | Sender identity                               |
+| `SENDER_EMAIL` | email       | One active claimant per sender address        |
+| `OAUTH_STATE`  | state hash  | Pending Google consent; `expiresAtEpoch` TTL  |
+| `GMAIL`        | identity ID | Gmail connection (encrypted credential)       |
+| `SETTINGS`     | user ID     | Feature switches and limits (absent: default) |
+
+Milestone 3 adds per-user partitions:
+
+| `pk`                     | `sk`           | Item                                 |
+| ------------------------ | -------------- | ------------------------------------ |
+| `CONTACT#<userId>`       | contact ID     | Contact                              |
+| `CONTACT_EMAIL#<userId>` | email          | Unique-email lock for that user      |
+| `TEMPLATE#<userId>`      | template ID    | Template                             |
+| `QUOTA#<userId>`         | UTC day        | `total`, `bulk` counters; TTL 8 days |
+| `SEND#<userId>`          | operation:hash | Send record; TTL 90 days             |
 
 Each collection is one partition, which is ample for five users and keeps
 listing a `Query` (no `Scan`). Reads that decide authorization are strongly
@@ -532,11 +559,251 @@ days**, so connections then need Reconnect weekly. Publishing the app
 sensitive scopes before an app can be used by other people; see Google's
 OAuth app verification documentation for whether this app needs it.
 
-### Not built in M2
+## User settings
 
-Compose, sending, templates, contacts, bulk mail, scheduling, recurring
-sends, inbox access or sync, other providers, background workers, public
-sign-up, billing, multi-factor authentication, and password reset.
+Each user has one `SETTINGS` item, written only by the OWNER from
+`/admin/users`. A user without one gets the defaults
+(`defaultUserSettings` in `lib/admin/settings.ts`):
+
+| Setting                         | Default | Range | Meaning                                     |
+| ------------------------------- | ------- | ----- | ------------------------------------------- |
+| `sendingEnabled`                | on      |       | May send at all                             |
+| `bulkSendingEnabled`            | on      |       | May send to more than one recipient at once |
+| `templatesEnabled`              | on      |       | May use templates                           |
+| `contactsEnabled`               | on      |       | May use contacts                            |
+| `dailyTotalEmails`              | 50      | 0–500 | Emails per UTC day, individual and bulk     |
+| `dailyBulkRecipients`           | 25      | 0–500 | Recipients of bulk sends per UTC day        |
+| `maxBulkRecipientsPerOperation` | 10      | 1–20  | Recipients in one bulk send                 |
+
+**These are the console's own safety limits, not Google's Gmail quotas.**
+Google applies its own per-account sending limits independently; the
+console neither knows nor mirrors them. If Gmail refuses a message for its
+own rate or quota reasons, the recipient is marked "Not sent: Gmail's own
+sending rate limit was reached" and the rest of the operation stops.
+
+The per-send maximum of 20 is bounded by the request: every recipient is
+sent within one Lambda invocation, which times out after 15 seconds (see
+"Bulk sending"). Changing a setting applies to the user's next request.
+Settings are read on the server for every send; the browser only displays
+them.
+
+## Contacts and templates
+
+Both are private to the user who created them and live in partitions keyed
+by that user's ID (`CONTACT#<userId>`, `TEMPLATE#<userId>`). The domain
+modules (`contacts.ts`, `templates.ts`) take the actor from the session and
+always build keys from `actor.id`, so another user's contact or template
+is simply "not found", for reads, edits, deletes, and sends alike. Nothing
+is shared, and the OWNER cannot see them either.
+
+**Contacts** have a name (required), an email (required), and an optional
+company and notes. The email is trimmed and lowercased and must be a plain
+ASCII address (no display names, spaces, or line breaks). It is unique per
+user through a `CONTACT_EMAIL#<userId>` lock written in the same
+transaction as the contact; changing a contact's email moves the lock in
+one transaction. Two users may each have a contact with the same email.
+Search (`/admin/contacts?q=`) matches name, email, or company. There is a
+storage bound of 1000 contacts per user.
+
+**Templates** have a name, a subject, and a plain-text body, with a bound
+of 100 per user. Choosing a template in compose copies its subject and
+body into the form, where they can still be edited; the send records which
+template was used.
+
+When the OWNER turns contacts or templates off for a user, the pages say
+so, every action refuses, and sends that name a contact or template are
+refused. Existing data is kept.
+
+### Placeholders
+
+`{{name}}`, `{{email}}`, and `{{company}}` (spaces inside the braces are
+allowed). There are no expressions, defaults, filters, or nesting. The same
+pure function (`lib/admin/personalization.ts`) runs in the compose preview
+and on the server, which always re-checks:
+
+- An unknown placeholder (for example `{{first_name}}`) or a stray `{{` or
+  `}}` is rejected when a template is saved and when a message is sent.
+- A placeholder with no value for a recipient (a contact without a company,
+  or a typed address that is not a contact, which has only `{{email}}`)
+  rejects the **whole send** before anything is reserved or sent, naming
+  the recipient. Nothing goes out with a placeholder left in or silently
+  removed.
+- Values are inserted literally in one pass and never rescanned, so a
+  contact named `{{email}}` stays that text.
+
+## Sending
+
+Sending is explicit and synchronous: the user presses Send on
+`/admin/compose`, and the Server Action sends within that request. There is
+no queue, worker, scheduler, cron, timer, or poller, and no message is sent
+later.
+
+### Message format
+
+`lib/admin/mimeMessage.ts` builds one RFC 5322 / MIME message per
+recipient, plain text only:
+
+```
+From: <approved identity address>
+To: <one recipient>
+Subject: <subject, RFC 2047 encoded unless plain printable ASCII>
+Date: <now, UTC>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: base64
+
+<body, base64>
+```
+
+The whole message is base64url encoded into the `raw` field of Gmail's
+`users.messages.send` (`gmail/v1/users/me/messages/send`), authenticated by
+the access token from M2's `getGmailAccessToken`. Gmail sends it from the
+account the token belongs to, and the message appears in that account's
+Sent folder. There is no `Cc`, `Bcc`, `Reply-To`, display name, HTML,
+attachment, tracking pixel, or unsubscribe header.
+
+**Header injection.** No header value is built from unchecked input. Both
+addresses must match a strict ASCII pattern with no spaces, commas, angle
+brackets, quotes, or line breaks. The subject (after personalization) must
+contain no control characters and is RFC 2047 encoded unless it is short
+printable ASCII. The body is base64 encoded, so its content can never be
+read as headers. A message that fails these checks refuses the whole send
+before anything is reserved. The `From` address is the approved identity's
+address read from the table; a `from` field in the form is ignored.
+
+### Flow
+
+```
+Send (form: operationId, senderIdentityId, contactIds, typed addresses,
+      templateId, subject, body; nothing else is read)
+  → session user ACTIVE? sending enabled?
+  → identity owned by the user and APPROVED? connection owned, matching,
+    CONNECTED, credential present, gmail.send granted?
+  → resolve own contacts and typed addresses; deduplicate by email
+  → more than one recipient: bulk enabled? within the per-send maximum?
+  → template (if any) owned and enabled?
+  → personalize and build every message (any failure: refuse all)
+  → reserve every send against today's counters (one transaction)
+  → getGmailAccessToken (M2: approval + connection + refresh)
+  → one Gmail call per recipient → record SENT / FAILED / UNCERTAIN
+  → per-recipient results
+```
+
+Every check that can refuse the send runs before anything is reserved, so
+a refused send consumes no quota and sends nothing. Ownership failures
+(another user's identity, contact, or template) look the same as missing
+records.
+
+### Bulk sending
+
+An operation with more than one unique recipient is a bulk send. Each
+recipient gets their own message with only their address in `To`;
+recipients never see each other. The recipient list is never truncated:
+over the per-send maximum, or over a daily limit, the whole send is refused
+with the numbers.
+
+Messages are sent with at most 4 Gmail calls in flight. Recipients not
+started within 10 seconds of the first call are released as "Not sent:
+sending stopped before this recipient", which keeps the request inside the
+Lambda's 15-second timeout. Gmail's own limits stop the rest of an
+operation too:
+
+| Gmail outcome                          | Recipient result | Rest of the operation |
+| -------------------------------------- | ---------------- | --------------------- |
+| Accepted (message ID)                  | `SENT`           | Continues             |
+| Message refused (4xx)                  | `FAILED`         | Continues             |
+| Rate or quota limit (429, quota error) | `FAILED`         | Not attempted         |
+| Token refused (401, scope error)       | `FAILED`         | Not attempted         |
+| Timeout, network error, 5xx            | `UNCERTAIN`      | Not attempted         |
+
+A refused token triggers one M2 connection check
+(`verifyGmailConnection`): if Google reports the grant gone, the connection
+becomes `REAUTH_REQUIRED` exactly as in M2, and the user is asked to
+Reconnect. No retry loop exists anywhere.
+
+### Daily limits
+
+Counters live in one item per user and UTC day (`QUOTA#<userId>`,
+`sk` = `YYYY-MM-DD`), holding `total` and `bulk`. They reset at 00:00 UTC
+because the next day is a new item; old items expire through the table's
+TTL after 8 days.
+
+A send reserves its quota **before** calling Gmail, in one DynamoDB
+transaction with the send records:
+
+- The counter update adds the number of recipients, conditional on
+  `total <= dailyTotalEmails - n` (and for bulk sends also
+  `bulk <= dailyBulkRecipients - n`), so the stored value can never exceed
+  the limit, however many requests race. A request that would cross it is
+  refused whole.
+- Each send record is created `RESERVED` in the same transaction.
+- On completion, `SENT` and `UNCERTAIN` keep their reservation. `FAILED`
+  releases it: the record update and the counter decrement are one
+  transaction, so the counter equals the number of sends that may have
+  reached Gmail.
+
+A send that dies mid-way (the Lambda times out or crashes) leaves records
+`RESERVED`: still counted, shown as "outcome unknown", and never resent.
+This errs towards under-sending.
+
+### Idempotency
+
+Each compose form carries an `operationId` generated by the server when the
+page renders (a millisecond timestamp plus 16 random bytes; the server
+checks its format). A send record's key is
+`<operationId>:<first 32 hex characters of SHA-256(recipient)>`, so
+repeating an operation addresses the same records:
+
+| Existing record | On a repeat of the same operation                   |
+| --------------- | --------------------------------------------------- |
+| none            | Reserved and sent                                   |
+| `SENT`          | Skipped: "Already sent; not sent again"             |
+| `RESERVED`      | Skipped: "in progress or outcome unknown"           |
+| `UNCERTAIN`     | Skipped: "Check the Sent folder in Gmail"           |
+| `FAILED`        | Reserved again (only if still `FAILED`) and retried |
+
+New records are written with "must not exist" and retried ones with
+"must still be `FAILED`", inside the reservation transaction. Two
+concurrent submissions of the same operation cannot both reserve a
+recipient: the loser sees a conflict, re-reads the records, and skips them.
+A double click, a retried request, or a resubmitted form therefore never
+sends twice to the same recipient.
+
+After a fully successful send, the server returns a fresh `operationId` and
+the form clears. After a refused or partly failed send, the form keeps the
+draft and the same `operationId`, so pressing Send again retries only the
+recipients that were not sent. "Start a new message" reloads the page with
+a new `operationId` for a deliberate fresh copy.
+
+The decision is recorded in
+[ADR 0005](../adr/0005-gmail-send-quota-and-idempotency.md).
+
+**This is not exactly-once delivery.** The console guarantees it will not
+call Gmail twice for the same operation and recipient. It cannot know
+whether Gmail delivered a message whose request timed out; such sends are
+`UNCERTAIN` and must be checked in Gmail's Sent folder. Gmail itself does
+not offer an idempotency key.
+
+### Send records and history
+
+A send record holds the operation ID, the sender identity and connection
+IDs, the sender address, the recipient, the personalized subject, the
+template ID, whether it was bulk, the quota day, status, attempts, Gmail's
+message ID, a failure code, and timestamps. **The body is never stored.**
+Records expire after 90 days through the table's TTL. `/admin/compose`
+lists the user's 20 most recent records (newest first; IDs begin with the
+time-ordered operation ID), and only the user's own.
+
+Results and history show fixed messages per status and failure code;
+nothing from Google's responses is shown or stored.
+
+### Not built in M3
+
+Scheduling, recurring sends, campaigns, analytics, open or click tracking,
+unsubscribe handling, attachments, HTML mail, inbox access or sync, other
+providers (Outlook, Microsoft 365, GoDaddy, Titan), background workers,
+public sign-up, billing, multi-tenancy, multi-factor authentication, and
+password reset.
 
 ## Logging
 
@@ -546,7 +813,10 @@ Passwords, password hashes, session tokens, invitation tokens, the
 bootstrap token, OAuth state, codes, access and refresh tokens, ID tokens,
 the client secret, and email addresses are never logged. Google errors
 carry a fixed message (`Google OAuth request failed (<kind>).`) and never a
-response body.
+response body. Sending logs nothing on success or on a Gmail refusal (the
+outcome is in the send record); an unexpected error logs only
+`[admin] Send failed (<error name>).` Message bodies, subjects,
+recipients, and Gmail responses are never logged.
 
 ## Known limitations
 
@@ -578,3 +848,16 @@ response body.
 - **Last write wins** on a connection: two simultaneous reconnects or
   refreshes of the same address store whichever finishes last, which is
   still a valid credential.
+- **No exactly-once delivery.** A Gmail request that times out or fails
+  with a 5xx is `UNCERTAIN`; the console never resends it, so the user must
+  check Gmail's Sent folder.
+- **Interrupted sends stay counted.** If the function stops mid-send,
+  records left `RESERVED` keep their quota for the rest of the UTC day and
+  show "outcome unknown".
+- **Contact and template bounds are not atomic.** Two simultaneous creates
+  at the bound can exceed it by one; they are storage hygiene, not
+  security limits.
+- **Bulk sends are capped at 20 recipients** by the request's time budget;
+  larger lists need several sends.
+- **Plain text only.** No HTML, attachments, display names, or `Reply-To`.
+- **A user's daily counters reset at 00:00 UTC**, not local midnight.

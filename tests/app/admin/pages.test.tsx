@@ -2,19 +2,27 @@ import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminLayout, { metadata as layoutMetadata } from "@/app/admin/layout";
 import ApprovalsPage from "@/app/admin/approvals/page";
+import ComposePage from "@/app/admin/compose/page";
+import ContactsPage from "@/app/admin/contacts/page";
 import InvitationPage from "@/app/admin/invite/[token]/page";
 import LoginPage from "@/app/admin/login/page";
 import DashboardPage from "@/app/admin/page";
 import SendersPage from "@/app/admin/senders/page";
 import SetupPage from "@/app/admin/setup/page";
+import TemplatesPage from "@/app/admin/templates/page";
 import UsersPage from "@/app/admin/users/page";
+import { createContact } from "@/lib/admin/contacts";
 import { createInvitation } from "@/lib/admin/invitations";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
 import type { GmailConnection } from "@/lib/admin/model";
 import { requestSenderIdentity } from "@/lib/admin/senderIdentities";
+import { defaultUserSettings, updateUserSettings } from "@/lib/admin/settings";
 import type { AdminStore } from "@/lib/admin/store";
+import { createTemplate } from "@/lib/admin/templates";
+import { createLocalTokenCipher } from "@/lib/admin/tokenCipher";
 import { now, seedOwner, seedUser, setupToken } from "@/tests/helpers/admin";
 import { seedApprovedIdentity } from "@/tests/helpers/gmail";
+import { seedConnectedSender } from "@/tests/helpers/mail";
 import { NavigationSignal } from "@/tests/helpers/nextRequest";
 
 const next = await vi.hoisted(async () => {
@@ -446,6 +454,214 @@ describe("sender identity pages", () => {
     );
     expect(
       screen.getByText(/Approval is not Gmail authorization/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("mail pages", () => {
+  async function mailSetup() {
+    const { store, owner, ownerToken } = await seedOwner();
+    const alice = await seedUser(store, owner, "alice@example.com", "Alice");
+    const bob = await seedUser(store, owner, "bob@example.com", "Bob");
+    await createContact(
+      store,
+      alice.user,
+      { name: "Rahul", email: "rahul@example.com", company: null, notes: null },
+      now,
+    );
+    await createContact(
+      store,
+      bob.user,
+      { name: "Priya", email: "priya@example.com", company: null, notes: null },
+      now,
+    );
+    await createTemplate(
+      store,
+      alice.user,
+      { name: "Alice intro", subject: "Hi {{name}}", body: "Hello" },
+      now,
+    );
+    await createTemplate(
+      store,
+      bob.user,
+      { name: "Bob intro", subject: "Hi", body: "Hello" },
+      now,
+    );
+    next.store = store;
+    return { store, owner, ownerToken, alice, bob };
+  }
+
+  const contactsProps = (query: Record<string, string> = {}) => ({
+    params: Promise.resolve({}),
+    searchParams: Promise.resolve(query),
+  });
+
+  it("requires a session", async () => {
+    await mailSetup();
+    for (const page of [
+      () => ContactsPage(contactsProps()),
+      () => TemplatesPage(contactsProps()),
+      ComposePage,
+    ]) {
+      expect(await navigation(page())).toBe("/admin/login");
+    }
+  });
+
+  it("lists only the signed-in user's own contacts", async () => {
+    const { alice } = await mailSetup();
+    signIn(alice.token);
+    render(await ContactsPage(contactsProps()));
+    expect(screen.getByText("rahul@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("priya@example.com")).not.toBeInTheDocument();
+  });
+
+  it("does not open another user's contact for editing", async () => {
+    const { store, alice, bob } = await mailSetup();
+    const [priya] = await store.listContacts(bob.user.id);
+    signIn(alice.token);
+    render(await ContactsPage(contactsProps({ edit: priya.id })));
+    expect(
+      screen.getByRole("heading", { name: "Add a contact" }),
+    ).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("priya@example.com");
+  });
+
+  it("filters contacts by the search query", async () => {
+    const { store, alice } = await mailSetup();
+    await createContact(
+      store,
+      alice.user,
+      { name: "Meera", email: "meera@example.com", company: null, notes: null },
+      now,
+    );
+    signIn(alice.token);
+    render(await ContactsPage(contactsProps({ q: "meera" })));
+    expect(screen.getByText("meera@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("rahul@example.com")).not.toBeInTheDocument();
+  });
+
+  it("lists only the signed-in user's own templates", async () => {
+    const { alice } = await mailSetup();
+    signIn(alice.token);
+    render(await TemplatesPage(contactsProps()));
+    expect(screen.getAllByText("Alice intro").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Bob intro")).not.toBeInTheDocument();
+  });
+
+  it("explains disabled contacts and templates instead of showing them", async () => {
+    const { store, owner, alice } = await mailSetup();
+    await updateUserSettings(
+      store,
+      owner,
+      alice.user.id,
+      {
+        ...defaultUserSettings,
+        contactsEnabled: false,
+        templatesEnabled: false,
+      },
+      now,
+    );
+    signIn(alice.token);
+    render(await ContactsPage(contactsProps()));
+    expect(
+      screen.getByText(
+        "Contacts are turned off for your account by the owner.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("rahul@example.com")).not.toBeInTheDocument();
+
+    render(await TemplatesPage(contactsProps()));
+    expect(
+      screen.getByText(
+        "Templates are turned off for your account by the owner.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("asks for a connected sender before offering the compose form", async () => {
+    const { alice } = await mailSetup();
+    signIn(alice.token);
+    render(await ComposePage());
+    expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/You need an approved sender identity/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Google applies its own Gmail limits/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers only the user's own connected senders, contacts, and templates", async () => {
+    const { store, owner, alice, bob } = await mailSetup();
+    const cipher = createLocalTokenCipher();
+    await seedConnectedSender(
+      store,
+      cipher,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    await seedConnectedSender(store, cipher, owner, bob.user, "bob@gmail.com");
+    await seedApprovedIdentity(
+      store,
+      owner,
+      alice.user,
+      "unconnected@gmail.com",
+    );
+    signIn(alice.token);
+    render(await ComposePage());
+
+    const from = screen.getByLabelText("From");
+    expect(
+      within(from)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["alice@gmail.com"]);
+    expect(screen.getByText("rahul@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("priya@example.com")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Alice intro" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Bob intro")).not.toBeInTheDocument();
+    expect(screen.getByText("0 / 50")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toMatch(
+      /ciphertext|encryptedDataKey|refresh/i,
+    );
+  });
+
+  it("explains that sending is turned off", async () => {
+    const { store, owner, alice } = await mailSetup();
+    await seedConnectedSender(
+      store,
+      createLocalTokenCipher(),
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    await updateUserSettings(
+      store,
+      owner,
+      alice.user.id,
+      { ...defaultUserSettings, sendingEnabled: false },
+      now,
+    );
+    signIn(alice.token);
+    render(await ComposePage());
+    expect(
+      screen.getByText("Sending is turned off for your account by the owner."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
+  });
+
+  it("gives the OWNER sending settings for each user", async () => {
+    const { ownerToken } = await mailSetup();
+    signIn(ownerToken);
+    render(await UsersPage());
+    expect(
+      screen.getByRole("form", { name: "Sending settings for Alice" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("form", { name: "Sending settings for Bob" }),
     ).toBeInTheDocument();
   });
 });

@@ -10,3 +10,23 @@ export type FormState = {
 };
 
 export const idleFormState: FormState = { status: "idle" };
+
+/** One recipient's outcome, as shown after a send. */
+export type ComposeResult = {
+  email: string;
+  status: "SENT" | "FAILED" | "UNCERTAIN" | "ALREADY_SENT" | "IN_PROGRESS";
+  message: string;
+};
+
+/**
+ * What the compose action returns. `operationId` is the idempotency key the
+ * form submits next: unchanged until every recipient is handled, so sending
+ * again after a partial failure retries only what was not sent.
+ */
+export type ComposeState = {
+  status: "idle" | "error" | "success";
+  operationId: string;
+  message?: string;
+  fieldErrors?: Partial<Record<string, string>>;
+  results?: ComposeResult[];
+};

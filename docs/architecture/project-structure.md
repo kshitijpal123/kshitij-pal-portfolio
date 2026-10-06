@@ -300,11 +300,14 @@ Both sections sit below the fold and reveal with the motion primitives.
 `components/admin/` holds the console UI. `AdminShell` (console navigation,
 signed-in user, sign out), `PageHeading`, `ProfileSummary`, `OwnerOverview`,
 `UserList`, `InvitationList`, `SenderIdentityList`, `SenderReviewList`,
-`GmailAccountList`, `StatusBadge`, `AdminField`, `AccountFields`,
-`FormStatus`, and `SubmitButton` are Server Components. The five forms
+`GmailAccountList`, `ContactList`, `TemplateList`, `SendHistory`,
+`GmailReadiness`, `StatusBadge`, `AdminField`, `AccountFields`,
+`FormStatus`, and `SubmitButton` are Server Components. The forms
 (`LoginForm`, `SetupForm`, `AcceptInvitationForm`, `InviteForm`,
-`SenderRequestForm`) are Client Components that submit a Server Action from
-`lib/admin/actions.ts` with `useActionState`; the only other one,
+`SenderRequestForm`, `ContactForm`, `TemplateForm`, `UserSettingsForm`, and
+`ComposeForm`, which also renders the personalized preview) are Client
+Components that submit a Server Action from `lib/admin/actions.ts` with
+`useActionState`; the only other one,
 `GmailConnectButton`, shows a pending label with `useFormStatus` while the
 browser is sent to Google. Row actions in the lists are plain `<form>`s
 bound to Server Actions, so they work without JavaScript.
@@ -599,8 +602,9 @@ in `next.config.ts` and their CloudFront copy in `infra/portfolio.yaml`.
 and IAM scope. Console tests run the domain modules against the memory
 store, with `tests/helpers/admin.ts` seeding an OWNER and users, and mock
 the Next.js request APIs with `tests/helpers/nextRequest.ts`. Gmail tests
-use the fake Google client in `tests/helpers/gmail.ts`; no test calls
-Google or AWS.
+use the fake Google client in `tests/helpers/gmail.ts`, and sending tests
+the connected-sender seed and fake Gmail API in `tests/helpers/mail.ts`; no
+test calls Google or AWS.
 
 ## Imports
 

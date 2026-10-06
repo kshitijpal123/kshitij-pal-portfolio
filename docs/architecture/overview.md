@@ -26,9 +26,10 @@ form" below).
 
 The same application also hosts a private, invitation-only mail console
 under `/admin`. It has its own authentication, roles, and a DynamoDB table,
-and is not linked from or indexed with the public site. Milestones 1 and 2
-of the console (accounts, invitations, sender identity approval, and Gmail
-account connection through Google OAuth) exist; it sends no email yet. See
+and is not linked from or indexed with the public site. Milestones 1–3 of
+the console (accounts, invitations, sender identity approval, Gmail account
+connection through Google OAuth, contacts, templates, and explicit
+individual and bulk sending through Gmail) exist. See
 [`mail-console.md`](mail-console.md).
 
 ## Layers

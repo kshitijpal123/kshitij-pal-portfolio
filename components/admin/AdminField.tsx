@@ -11,9 +11,11 @@ type AdminFieldProps = {
   autoComplete?: string;
   maxLength?: number;
   required?: boolean;
+  /** Renders a textarea with this many rows instead of an input. */
+  rows?: number;
 };
 
-const controlClassName =
+export const controlClassName =
   "mt-2 block min-h-11 w-full rounded-control border border-border-strong bg-surface px-3 py-2 text-body text-foreground transition-colors hover:border-foreground aria-invalid:border-danger";
 
 /**
@@ -31,10 +33,22 @@ export function AdminField({
   autoComplete,
   maxLength,
   required = true,
+  rows,
 }: AdminFieldProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = cx(hint && hintId, error && errorId) || undefined;
+  const control = {
+    id,
+    name,
+    defaultValue,
+    autoComplete,
+    maxLength,
+    required,
+    "aria-invalid": error ? true : undefined,
+    "aria-describedby": describedBy,
+    className: controlClassName,
+  };
 
   return (
     <div>
@@ -46,18 +60,11 @@ export function AdminField({
           {hint}
         </p>
       )}
-      <input
-        id={id}
-        name={name}
-        type={type}
-        defaultValue={defaultValue}
-        autoComplete={autoComplete}
-        maxLength={maxLength}
-        required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={controlClassName}
-      />
+      {rows ? (
+        <textarea {...control} rows={rows} />
+      ) : (
+        <input {...control} type={type} />
+      )}
       {error && (
         <p id={errorId} className="mt-2 text-body-sm text-danger">
           {error}
