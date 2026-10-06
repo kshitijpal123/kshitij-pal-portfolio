@@ -30,6 +30,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+
       - name: Bundle scheduler function
         run: node infra/package-scheduler.mts
 
@@ -37,15 +38,19 @@ jobs:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+
     environment:
       name: production
       url: ${{ vars.SITE_URL }}
+
     concurrency:
       group: production-deploy
       cancel-in-progress: false
+
     permissions:
       contents: read
       id-token: write
+
     env:
       STACK_NAME: portfolio-production
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -55,26 +60,30 @@ jobs:
       CONTACT_TO_EMAIL: ${{ vars.CONTACT_TO_EMAIL }}
       CONTACT_FROM_EMAIL: ${{ vars.CONTACT_FROM_EMAIL }}
       SITE_URL: ${{ vars.SITE_URL }}
-      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+
     steps:
       - name: Check deployment configuration
         run: |
           missing=0
+
           for name in AWS_REGION AWS_DEPLOY_ROLE_ARN AWS_CLOUDFORMATION_ROLE_ARN AWS_ARTIFACTS_BUCKET SITE_URL; do
             if [ -z "${!name}" ]; then
               echo "::error::Variable $name is not set on the production environment. See docs/architecture/deployment.md."
               missing=1
             fi
           done
+
           case "$SITE_URL" in
             https://*/*) invalid=1 ;;
             https://?* | "") invalid=0 ;;
             *) invalid=1 ;;
           esac
+
           if [ "$invalid" = 1 ]; then
             echo "::error::SITE_URL must be a bare https:// origin without a trailing slash, for example https://domain.tld."
             missing=1
           fi
+
           exit $missing
 
       - uses: actions/checkout@v4
@@ -107,6 +116,7 @@ jobs:
           bucket=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='AssetsBucketName'].OutputValue" \
             --output text 2>/dev/null || true)
+
           if [ -n "$bucket" ] && [ "$bucket" != "None" ]; then
             aws s3 sync .next/static "s3://$bucket/_next/static" \
               --cache-control "public, max-age=31536000, immutable"
@@ -127,6 +137,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           # Optional; empty keeps /admin/setup closed. Remove it after setup.
           ADMIN_BOOTSTRAP_TOKEN: ${{ secrets.ADMIN_BOOTSTRAP_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           # Optional; empty leaves Gmail connection unavailable.
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
@@ -145,13 +156,24 @@ jobs:
               "GoogleClientId=$GOOGLE_CLIENT_ID" \
               "GoogleClientSecret=$GOOGLE_CLIENT_SECRET"
 
+      - name: Show CloudFormation failure events
+        if: failure()
+        run: |
+          aws cloudformation describe-stack-events \
+            --region "$AWS_REGION" \
+            --stack-name "$STACK_NAME" \
+            --query "StackEvents[?ResourceStatus=='CREATE_FAILED' || ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_FAILED'].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]" \
+            --output table
+
       - name: Read stack outputs
         id: stack
         run: |
           output() {
             aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+              --output text
           }
+
           echo "bucket=$(output AssetsBucketName)" >> "$GITHUB_OUTPUT"
           echo "distribution=$(output DistributionId)" >> "$GITHUB_OUTPUT"
           echo "distribution_url=$(output DistributionUrl)" >> "$GITHUB_OUTPUT"
@@ -165,9 +187,13 @@ jobs:
         run: |
           id=$(aws cloudfront create-invalidation \
             --distribution-id "${{ steps.stack.outputs.distribution }}" \
-            --paths "/*" --query Invalidation.Id --output text)
+            --paths "/*" \
+            --query Invalidation.Id \
+            --output text)
+
           aws cloudfront wait invalidation-completed \
-            --distribution-id "${{ steps.stack.outputs.distribution }}" --id "$id"
+            --distribution-id "${{ steps.stack.outputs.distribution }}" \
+            --id "$id"
 
       - name: Smoke test
         env:
@@ -178,14 +204,21 @@ jobs:
             echo "$1 $SITE_URL$2 -> $status"
             [ "$status" = "$3" ]
           }
+
           check GET / 200
           check GET /work/billsync 200
           check GET /robots.txt 200
           check GET /sitemap.xml 200
           check GET /api/contact 405
           check GET /this-page-does-not-exist 404
+
           curl -sf "$SITE_URL/robots.txt" | grep -qx "Sitemap: $SITE_URL/sitemap.xml" \
-            || { echo "::error::robots.txt does not list $SITE_URL/sitemap.xml"; exit 1; }
+            || {
+              echo "::error::robots.txt does not list $SITE_URL/sitemap.xml"
+              exit 1
+            }
+
           status=$(curl -s -o /dev/null -w "%{http_code}" "$DISTRIBUTION_URL/")
           echo "GET $DISTRIBUTION_URL/ -> $status"
           [ "$status" = "200" ]
+```
