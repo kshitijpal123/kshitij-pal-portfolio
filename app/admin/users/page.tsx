@@ -5,10 +5,9 @@ import { InvitationList } from "@/components/admin/InvitationList";
 import { InviteForm } from "@/components/admin/InviteForm";
 import { PageHeading } from "@/components/admin/PageHeading";
 import { UserList } from "@/components/admin/UserList";
-import { UserSettingsForm } from "@/components/admin/UserSettingsForm";
+import { Link } from "@/components/ui/Link";
 import { getAdminStore } from "@/lib/admin/getAdminStore";
 import { requireOwner } from "@/lib/admin/session";
-import { defaultUserSettings, listUserSettings } from "@/lib/admin/settings";
 import { getUserAdministration } from "@/lib/admin/users";
 
 export const metadata: Metadata = { title: "Users" };
@@ -16,11 +15,8 @@ export const metadata: Metadata = { title: "Users" };
 export default async function UsersPage() {
   const owner = await requireOwner();
   const store = getAdminStore();
-  const [administration, settings] = await Promise.all([
-    getUserAdministration(store, owner, new Date()),
-    listUserSettings(store, owner),
-  ]);
-  if (!administration || !settings) redirect("/admin");
+  const administration = await getUserAdministration(store, owner, new Date());
+  if (!administration) redirect("/admin");
 
   const { users, invitations, capacity } = administration;
   const full = capacity.used >= capacity.max;
@@ -65,42 +61,10 @@ export default async function UsersPage() {
           </div>
         </section>
 
-        <section aria-labelledby="settings-heading">
-          <h2 id="settings-heading" className="text-h3">
-            Sending settings
-          </h2>
-          <p className="mt-2 max-w-measure text-body-sm text-muted-foreground">
-            Feature switches and the console&apos;s own daily safety limits per
-            account, reset at 00:00 UTC. They are not Google&apos;s Gmail
-            quotas, which Google enforces separately. Defaults:{" "}
-            {defaultUserSettings.dailyTotalEmails} emails and{" "}
-            {defaultUserSettings.dailyBulkRecipients} bulk recipients per day,{" "}
-            {defaultUserSettings.maxBulkRecipientsPerOperation} recipients per
-            bulk send; {defaultUserSettings.maxScheduledEmails} active
-            schedules, of which {defaultUserSettings.maxRecurringSchedules}{" "}
-            repeating, with the first send at most{" "}
-            {defaultUserSettings.maxFutureSchedulingWindowDays} days ahead.
-          </p>
-          <ul className="mt-4 divide-y divide-border border-y border-border">
-            {users.map((user) => {
-              const userSettings = settings.get(user.id);
-              return userSettings ? (
-                <li key={user.id} className="grid gap-3 py-5">
-                  <p className="font-medium break-words">
-                    {user.name}{" "}
-                    <span className="font-normal text-muted-foreground">
-                      {user.email}
-                    </span>
-                  </p>
-                  <UserSettingsForm
-                    settings={userSettings}
-                    userName={user.name}
-                  />
-                </li>
-              ) : null;
-            })}
-          </ul>
-        </section>
+        <p className="text-body-sm">
+          Feature switches and limits per account are under{" "}
+          <Link href="/admin/settings">Settings</Link>.
+        </p>
 
         <section aria-labelledby="invitations-heading">
           <h2 id="invitations-heading" className="text-h3">

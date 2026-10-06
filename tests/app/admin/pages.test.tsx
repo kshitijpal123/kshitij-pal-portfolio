@@ -9,6 +9,7 @@ import InvitationPage from "@/app/admin/invite/[token]/page";
 import LoginPage from "@/app/admin/login/page";
 import DashboardPage from "@/app/admin/page";
 import SendersPage from "@/app/admin/senders/page";
+import SettingsPage from "@/app/admin/settings/page";
 import SetupPage from "@/app/admin/setup/page";
 import TemplatesPage from "@/app/admin/templates/page";
 import UsersPage from "@/app/admin/users/page";
@@ -822,7 +823,7 @@ describe("mail pages", () => {
   it("gives the OWNER sending settings for each user", async () => {
     const { ownerToken } = await mailSetup();
     signIn(ownerToken);
-    render(await UsersPage());
+    render(await SettingsPage());
     expect(
       screen.getByRole("form", { name: "Sending settings for Alice" }),
     ).toBeInTheDocument();

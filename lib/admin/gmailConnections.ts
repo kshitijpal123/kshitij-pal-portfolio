@@ -506,6 +506,11 @@ const gmailNotices: Record<string, GmailNotice> = {
     status: "error",
     message: "That Gmail connection was not found.",
   },
+  "rate-limited": {
+    status: "error",
+    message:
+      "Too many Gmail requests in a short time. Wait a few minutes and try again.",
+  },
   failed: {
     status: "error",
     message: "The Gmail request could not be completed. Please try again.",

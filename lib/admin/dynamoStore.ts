@@ -10,6 +10,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
+  type AuditEvent,
   type Contact,
   countUsedSeats,
   type DailyUsage,
@@ -27,7 +28,12 @@ import {
   type User,
   type UserSettings,
 } from "@/lib/admin/model";
-import type { AdminStore, ScheduleEnd } from "@/lib/admin/store";
+import type {
+  AdminStore,
+  Page,
+  PageRequest,
+  ScheduleEnd,
+} from "@/lib/admin/store";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -39,6 +45,9 @@ const usageRetentionMs = 8 * dayMs;
 
 /** Final schedules and occurrence runs are kept this long, then expire. */
 export const scheduleRetentionMs = 90 * dayMs;
+
+/** Audit events are kept for a year, then expire. */
+export const auditRetentionMs = 365 * dayMs;
 
 /**
  * Single-table layout (partition key `pk`, sort key `sk`). Every collection
@@ -79,6 +88,13 @@ export const scheduleRetentionMs = 90 * dayMs;
  * | SCHEDULE_COUNT         | user id                | `active`, `recurring`  |
  * | SCHEDULE_RUN#<userId>  | schedule id#occurrence | ScheduleRun (TTL)      |
  *
+ * Audit and rate limiting (M5):
+ *
+ * | pk                     | sk                     | Holds                  |
+ * | ---------------------- | ---------------------- | ---------------------- |
+ * | AUDIT#<userId|system>  | ISO time#random        | AuditEvent (TTL 1 year) |
+ * | RATE                   | key#window start       | `count` (TTL)          |
+ *
  * Reads that decide authorization are strongly consistent.
  */
 const keys = {
@@ -117,6 +133,11 @@ const keys = {
   run: (userId: string, scheduleId: string, occurrence: string) => ({
     pk: `SCHEDULE_RUN#${userId}`,
     sk: `${scheduleId}#${occurrence}`,
+  }),
+  audit: (subject: string, id: string) => ({ pk: `AUDIT#${subject}`, sk: id }),
+  rate: (key: string, windowStart: number) => ({
+    pk: "RATE",
+    sk: `${key}#${windowStart}`,
   }),
 };
 
@@ -299,6 +320,39 @@ export function createDynamoStore(
       ExclusiveStartKey = query.Limit ? undefined : page.LastEvaluatedKey;
     } while (ExclusiveStartKey);
     return records;
+  }
+
+  /**
+   * One newest-first page of a partition. The partition key is always built
+   * by the caller from server-side data; a cursor supplies only a sort key.
+   */
+  async function queryPage<T>(
+    pk: string,
+    range: { lower: string; upper: string } | null,
+    { after, limit }: PageRequest,
+  ): Promise<Page<T>> {
+    const result = await client.send(
+      new QueryCommand({
+        TableName,
+        KeyConditionExpression: range
+          ? "pk = :pk AND sk BETWEEN :lower AND :upper"
+          : "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": pk,
+          ...(range ? { ":lower": range.lower, ":upper": range.upper } : {}),
+        },
+        ScanIndexForward: false,
+        Limit: limit,
+        ...(after ? { ExclusiveStartKey: { pk, sk: after } } : {}),
+      }),
+    );
+    const items: T[] = [];
+    for (const item of result.Items ?? []) {
+      const value = strip<T>(item);
+      if (value) items.push(value);
+    }
+    const last = result.LastEvaluatedKey?.sk;
+    return { items, last: typeof last === "string" ? last : null };
   }
 
   return {
@@ -1042,6 +1096,61 @@ export function createDynamoStore(
         ScanIndexForward: false,
         Limit: limit,
       });
+    },
+
+    listSendRecordsPage(userId, range, page) {
+      return queryPage<SendRecord>(`SEND#${userId}`, range, page);
+    },
+
+    /*
+     * Fixed windows: one counter item per key and window, so counting is a
+     * single conditional update with no read first. Concurrent requests can
+     * never count past the limit.
+     */
+    async consumeRateLimit(key, limit, windowMs, now) {
+      if (limit < 1) return false;
+      const windowStart = Math.floor(now.getTime() / windowMs) * windowMs;
+      try {
+        await client.send(
+          new UpdateCommand({
+            TableName,
+            Key: keys.rate(key, windowStart),
+            UpdateExpression: "SET expiresAtEpoch = :ttl ADD #count :one",
+            ConditionExpression:
+              "attribute_not_exists(#count) OR #count < :limit",
+            ExpressionAttributeNames: { "#count": "count" },
+            ExpressionAttributeValues: {
+              ":ttl": epochSeconds(windowStart + windowMs),
+              ":one": 1,
+              ":limit": limit,
+            },
+          }),
+        );
+        return true;
+      } catch (error) {
+        if (isConditionFailure(error)) return false;
+        throw error;
+      }
+    },
+
+    async appendAuditEvent(event) {
+      await client.send(
+        new PutCommand({
+          TableName,
+          Item: {
+            ...keys.audit(event.subject, event.id),
+            ...event,
+            expiresAtEpoch: epochSeconds(
+              Date.parse(event.at) + auditRetentionMs,
+            ),
+          },
+          ConditionExpression: notExists,
+        }),
+      );
+    },
+
+    listAuditEvents(subject, page) {
+      return queryPage<AuditEvent>(`AUDIT#${subject}`, null, page);
     },
 
     listSchedules(userId) {

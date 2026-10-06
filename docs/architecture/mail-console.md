@@ -1,6 +1,7 @@
 # Private Mail Console
 
-Status: Milestone 4 of the console. Milestone 1 (foundation) built
+Status: Milestone 5 of the console, its final application milestone.
+Milestone 1 (foundation) built
 authentication, users, roles, invitations, the five-user limit, the OWNER
 bootstrap, and sender identity approval. Milestone 2 added Gmail account
 connection through Google OAuth (see "Gmail connection"). Milestone 3 added
@@ -8,7 +9,11 @@ contacts, templates, and explicit individual and bulk sending through the
 connected Gmail accounts (see "Contacts and templates" and "Sending").
 Milestone 4 adds one-time and recurring scheduled sends, triggered by
 EventBridge Scheduler and sent through the same M3 sending path (see
-"Scheduled sending").
+"Scheduled sending"). Milestone 5 completes the console: a dashboard, a
+settings page with scheduling switches, searchable sending history, manual
+retry of failed sends through the M3 path, an audit log, per-user rate
+limits, and a security and production-configuration review (see
+"Milestone 5").
 
 Approved sender identity does not mean Gmail authorization, and Gmail
 authorization does not mean approval. Sending needs both.
@@ -43,7 +48,10 @@ untouched.
 | Manage own contacts and templates              | Yes   | Yes  |
 | Send from own approved, connected addresses    | Yes   | Yes  |
 | Schedule, view, and cancel own scheduled sends | Yes   | Yes  |
+| Search own history, retry own failed sends     | Yes   | Yes  |
+| See own settings and own audit trail           | Yes   | Yes  |
 | See all users, invitations, and seat usage     | Yes   | No   |
+| See every account's counters and audit trail   | Yes   | No   |
 | Set each user's feature switches and limits    | Yes   | No   |
 | Invite and revoke invitations                  | Yes   | No   |
 | Disable and re-enable USERs                    | Yes   | No   |
@@ -56,19 +64,23 @@ itself, and USER-status changes never apply to the OWNER.
 
 ## Routes
 
-| Route                   | Who                              | Purpose                                               |
-| ----------------------- | -------------------------------- | ----------------------------------------------------- |
-| `/admin`                | Signed in                        | Profile, identities, Gmail accounts, OWNER overview   |
-| `/admin/login`          | Anyone                           | Sign in (redirects to `/admin` if signed in)          |
-| `/admin/setup`          | Anyone, only while bootstrapping | Create the OWNER; 404 otherwise (signed in: `/admin`) |
-| `/admin/invite/[token]` | Holder of an open invitation     | Choose a name and password                            |
-| `/admin/users`          | OWNER                            | Seats, users, invitations, invite form, user settings |
-| `/admin/senders`        | Signed in                        | Request and track own sender identities               |
-| `/admin/approvals`      | OWNER                            | Review sender identity requests                       |
-| `/admin/compose`        | Signed in                        | Compose, preview, send; today's limits; recent sends  |
-| `/admin/schedules`      | Signed in                        | Schedule a send; own schedules; cancel; limits        |
-| `/admin/contacts`       | Signed in                        | Own contacts: add, edit, delete, search (`?q=`)       |
-| `/admin/templates`      | Signed in                        | Own templates: add, edit, delete                      |
+| Route                   | Who                               | Purpose                                               |
+| ----------------------- | --------------------------------- | ----------------------------------------------------- |
+| `/admin`                | Signed in                         | Dashboard: usage, attention, Gmail, OWNER overview    |
+| `/admin/login`          | Anyone                            | Sign in (redirects to `/admin` if signed in)          |
+| `/admin/setup`          | Anyone, only while bootstrapping  | Create the OWNER; 404 otherwise (signed in: `/admin`) |
+| `/admin/invite/[token]` | Holder of an open invitation      | Choose a name and password                            |
+| `/admin/users`          | OWNER                             | Seats, users, invitations, invite form                |
+| `/admin/senders`        | Signed in                         | Request and track own sender identities               |
+| `/admin/approvals`      | OWNER                             | Review sender identity requests                       |
+| `/admin/compose`        | Signed in                         | Compose, preview, send; today's limits; recent sends  |
+| `/admin/schedules`      | Signed in                         | Schedule a send; own schedules; cancel; limits        |
+| `/admin/contacts`       | Signed in                         | Own contacts: add, edit, delete, search (`?q=`)       |
+| `/admin/templates`      | Signed in                         | Own templates: add, edit, delete                      |
+| `/admin/history`        | Signed in                         | Own sends: search, filter, page                       |
+| `/admin/history/[id]`   | Signed in (own operation only)    | One operation's recipients; retry failed ones         |
+| `/admin/settings`       | Signed in (forms: OWNER)          | Own settings; OWNER configures every account          |
+| `/admin/audit`          | Signed in (others' trails: OWNER) | Audit trail                                           |
 
 `/admin/oauth/google/callback` is a Route Handler, not a page: Google
 redirects the browser there after consent (see "Gmail connection").
@@ -115,6 +127,11 @@ lib/admin/
   scheduler.ts       EventBridge Scheduler triggers: create and delete
   scheduleExecution.ts  One scheduled occurrence: validate, claim, send
   scheduleHandler.ts The scheduler Lambda's entry point (bundled separately)
+  dashboard.ts       Own dashboard summary; OWNER account counters
+  history.ts         Own history: query parsing, filtered paging, detail
+  retry.ts           Manual retry of failed sends through sendEmail
+  audit.ts           Audit events: sanitizing, writing, authorized reading
+  rateLimit.ts       Per-user action limits, counted in the table
   session.ts         Cookies and requireUser / requireOwner (request scope)
   actions.ts         Server Actions: thin wrappers over the modules above
 ```
@@ -219,6 +236,13 @@ Milestone 4 adds:
 | `SCHEDULE_ID`           | schedule ID           | Owner pointer for the execution function       |
 | `SCHEDULE_COUNT`        | user ID               | `active`, `recurring` counters                 |
 | `SCHEDULE_RUN#<userId>` | scheduleId#local time | One occurrence's claim and result; TTL 90 days |
+
+Milestone 5 adds:
+
+| `pk`                        | `sk`                 | Item                                        |
+| --------------------------- | -------------------- | ------------------------------------------- |
+| `AUDIT#<userId>` / `system` | ISO time#random      | Audit event (metadata only); TTL 1 year     |
+| `RATE`                      | action:userId#window | Rate-limit counter; TTL at the window's end |
 
 Each collection is one partition, which is ample for five users and keeps
 listing a `Query` (no `Scan`). Reads that decide authorization are strongly
@@ -581,7 +605,8 @@ OAuth app verification documentation for whether this app needs it.
 ## User settings
 
 Each user has one `SETTINGS` item, written only by the OWNER from
-`/admin/users`. A user without one gets the defaults
+`/admin/settings`. A user without one gets the defaults; an item saved
+before a switch existed reads that switch as its default (on)
 (`defaultUserSettings` in `lib/admin/settings.ts`):
 
 | Setting                         | Default | Range | Meaning                                      |
@@ -590,6 +615,8 @@ Each user has one `SETTINGS` item, written only by the OWNER from
 | `bulkSendingEnabled`            | on      |       | May send to more than one recipient at once  |
 | `templatesEnabled`              | on      |       | May use templates                            |
 | `contactsEnabled`               | on      |       | May use contacts                             |
+| `schedulingEnabled`             | on      |       | May create schedules; occurrences may send   |
+| `recurringEnabled`              | on      |       | Same, for recurring schedules                |
 | `dailyTotalEmails`              | 50      | 0–500 | Emails per UTC day, individual and bulk      |
 | `dailyBulkRecipients`           | 25      | 0–500 | Recipients of bulk sends per UTC day         |
 | `maxBulkRecipientsPerOperation` | 10      | 1–20  | Recipients in one bulk send                  |
@@ -1001,14 +1028,14 @@ schedule carry its `scheduleId`, and compose's history marks them
 No send is retried automatically. An occurrence is final once claimed; a
 recurring schedule continues with its next occurrence.
 
-| Category      | Failure codes                                                                                                                                                                  | Result                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
-| AUTHORIZATION | `user-inactive`, `sending-disabled`, `sender-unavailable`, `not-connected`, `reauth-required`, `gmail-auth-failed`, `contacts-disabled`, `templates-disabled`, `bulk-disabled` | Not sent                             |
-| VALIDATION    | `template-not-found`, `recipient-not-found`, `invalid-recipient`, `no-recipients`, `unresolved-placeholder`, `invalid-message`, `missed`                                       | Not sent                             |
-| LIMIT         | `bulk-limit-exceeded`, `daily-limit-reached`, `daily-bulk-limit-reached`                                                                                                       | Not sent                             |
-| REJECTED      | `gmail-rejected`                                                                                                                                                               | Not sent (Gmail refused it)          |
-| TRANSIENT     | `gmail-unavailable` (before sending), `gmail-rate-limited`, `busy`, `not-attempted`                                                                                            | Not sent; not retried                |
-| UNCERTAIN     | `gmail-unavailable` (during sending), `interrupted`                                                                                                                            | May have been sent; **never resent** |
+| Category      | Failure codes                                                                                                                                                                                         | Result                               |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| AUTHORIZATION | `user-inactive`, `sending-disabled`, `scheduling-disabled`, `sender-unavailable`, `not-connected`, `reauth-required`, `gmail-auth-failed`, `contacts-disabled`, `templates-disabled`, `bulk-disabled` | Not sent                             |
+| VALIDATION    | `template-not-found`, `recipient-not-found`, `invalid-recipient`, `no-recipients`, `unresolved-placeholder`, `invalid-message`, `missed`                                                              | Not sent                             |
+| LIMIT         | `bulk-limit-exceeded`, `daily-limit-reached`, `daily-bulk-limit-reached`                                                                                                                              | Not sent                             |
+| REJECTED      | `gmail-rejected`                                                                                                                                                                                      | Not sent (Gmail refused it)          |
+| TRANSIENT     | `gmail-unavailable` (before sending), `gmail-rate-limited`, `busy`, `not-attempted`                                                                                                                   | Not sent; not retried                |
+| UNCERTAIN     | `gmail-unavailable` (during sending), `interrupted`                                                                                                                                                   | May have been sent; **never resent** |
 
 `interrupted` is an unexpected error while sending: the run is recorded
 `UNCERTAIN` and whatever M3 reserved stays reserved. The only retries are
@@ -1060,7 +1087,9 @@ read at each occurrence, so placeholders use the contact's current name,
 email, and company, and a deleted contact fails the occurrence
 (`recipient-not-found`). A disabled identity, a disconnected or
 reauthorization-required Gmail connection, a disabled user, or sending
-turned off likewise stops each later occurrence until fixed.
+turned off likewise stops each later occurrence until fixed. So does
+turning scheduling off, or turning recurring schedules off for a recurring
+one (M5): the occurrence fails as `scheduling-disabled`.
 
 ### Configuration
 
@@ -1085,6 +1114,246 @@ attachments, HTML mail, inbox access or sync, other providers (Outlook,
 Microsoft 365, GoDaddy, Titan), editing or pausing schedules, automatic
 retries, public sign-up, billing, multi-tenancy, multi-factor
 authentication, and password reset.
+
+## Milestone 5
+
+M5 adds no infrastructure, environment variable, dependency, index, or IAM
+permission. Its new items live in the existing table, which both functions
+can already read and write. Nothing runs between requests.
+
+### Dashboard
+
+`/admin` shows the signed-in user's own numbers (`lib/admin/dashboard.ts`):
+today's emails and bulk recipients against their limits, with what
+remains; how many sender addresses are ready (approved and connected),
+approved, and awaiting review; active and recurring schedules against
+their limits; the feature switches; up to five items needing attention
+(failed, uncertain, or long-unfinished sends among the latest 50,
+connections needing Reconnect, and overdue or failed schedules); and the
+five most recent sends. The OWNER additionally sees an "Accounts overview":
+each account's status, today's counters, and active schedules against its
+limits. It is built from counters and settings only, never another user's
+contacts, templates, recipients, subjects, or bodies.
+
+### Settings
+
+`/admin/settings` shows every user their own effective switches and
+limits, read-only. The OWNER also gets, for each account, its role
+(display only), a disable/re-enable button for USERs, and the settings
+form, which now includes two switches:
+
+- `schedulingEnabled`: off refuses new schedules (`scheduling-disabled`)
+  and stops every occurrence of existing ones.
+- `recurringEnabled`: off refuses new recurring schedules
+  (`recurring-disabled`) and stops occurrences of existing recurring ones.
+
+Both are checked in `createSchedule` and again in the execution function
+before each occurrence; the schedules page only reflects them. Roles are
+not editable: M1's single-OWNER rule means there is no promotion or
+demotion path, and M5 keeps it.
+
+### History and search
+
+`/admin/history` lists the signed-in user's send records, newest first, 25
+per page, with filters for status, UTC date range, recipient and sender
+(substring), individual or bulk, sent now or scheduled, failure category
+(the same categories as scheduled occurrences), and schedule. The query
+string is parsed against allowlists (`parseHistoryQuery`); unknown
+parameters and malformed values are ignored, and a reversed date range is
+reported instead of searched.
+
+Send record keys begin with the operation's millisecond timestamp, so a
+date range is a key condition on the user's own `SEND#<userId>` partition;
+no index is needed. The other filters are applied while reading. A request
+reads at most 500 records, in pages of up to 100; if the budget runs out
+before a page is full, the page offers to continue from where it stopped.
+The cursor is the last record key read; it is accepted only in the shape of
+a send record key and within the requested range, and the partition always
+comes from the session.
+
+`/admin/history/[operationId]` shows every recipient of one operation, its
+schedule and occurrence when it came from one, and the retry form. Another
+user's operation, or a malformed ID, is a 404.
+
+### Retry
+
+Retry (`lib/admin/retry.ts`) is a manual request for one of the user's own
+operations, and it **is** M3's send path: it calls `sendEmail` again with
+the operation's original ID, its sender identity, its template, and its
+recipients except those Gmail rejected. Everything is checked again for
+the signed-in user: account status, sending and bulk switches, sender
+approval, the Gmail connection, contacts, the template, bulk limits, and
+today's quota. M3's records then decide who is sent:
+
+| Record                                  | On retry                       |
+| --------------------------------------- | ------------------------------ |
+| `SENT`                                  | Skipped, never resent          |
+| `UNCERTAIN`, `RESERVED`                 | Skipped, never resent          |
+| `FAILED` with `gmail-rejected`          | Excluded (would fail the same) |
+| `FAILED`, any other code (listed below) | Reserved again and sent        |
+
+Retryable codes: `not-connected`, `reauth-required`, `gmail-auth-failed`,
+`gmail-rate-limited`, `gmail-unavailable` (as `FAILED`, so before sending),
+`not-attempted`. An operation with nothing retryable is refused with a
+reason ("unknown outcome", "rejected by Gmail", or "already sent").
+
+The message: an immediate send's body was never stored, so the retry form
+asks for the subject and body again (prefilled with the recorded subject,
+and the template's body if one was used). A scheduled occurrence uses its
+schedule's stored subject and body while the schedule is `ACTIVE`; once it
+ends, its body has been cleared and the occurrence can no longer be
+retried. A retry of an occurrence does not change the occurrence's run
+record or the schedule; the new outcome is in the send records.
+
+There is no automatic retry anywhere: retry runs only when the user
+submits the form, and it is rate limited.
+
+### Audit log
+
+`lib/admin/audit.ts` appends one event per security-relevant action:
+sign-in (success and failure), sign-out, OWNER setup, invitations
+(create, revoke, accept), account status, sender requests and reviews,
+Gmail connection start, completion (the callback), check, and disconnect,
+settings changes, sends, retries, schedule creation and cancellation, and
+each scheduled occurrence. Refusals by a rate limit are recorded as
+`rate-limited`, refusals by role as `denied`.
+
+An event records the trail it belongs to, the actor, the action, the
+outcome, an optional target ID, a timestamp, and a small `detail` map.
+`sanitizeAuditDetail` runs on every write: it keeps at most 16 primitive
+values under plain keys, drops any key that could name a secret or
+content (token, secret, password, credential, cookie, authorization,
+verifier, nonce, state, code, body, subject, content, email), truncates
+strings, and redacts anything that looks like an email address. Events
+therefore never hold passwords, Gmail access or refresh tokens, the client
+secret, authorization codes, OAuth state, message bodies, subjects, or
+recipient addresses; sends are recorded as counts.
+
+Trails: an event goes to the acting user's trail; an occurrence goes to the
+schedule owner's trail with no actor; a sign-in attempt for an unknown
+address and a wrong setup token go to the `system` trail without the
+address. `/admin/audit` shows a USER only their own trail. The OWNER can
+choose any account's trail or the system trail. Events expire after one
+year. Writing is best effort: the action has already happened, so a failed
+write logs a fixed line and is not retried.
+
+### Rate limiting
+
+`lib/admin/rateLimit.ts` limits each signed-in user's mutating Server
+Actions per fixed window, keyed by the session's user ID (never by form
+input):
+
+| Action                                    | Limit         |
+| ----------------------------------------- | ------------- |
+| Every send submission                     | 30 per 10 min |
+| Send submissions with several recipients  | 10 per hour   |
+| Retries                                   | 20 per hour   |
+| Starting a Gmail connection               | 10 per 15 min |
+| Checking or disconnecting Gmail           | 30 per hour   |
+| Sender identity requests                  | 10 per hour   |
+| Sender identity reviews (OWNER)           | 60 per hour   |
+| Invitations (OWNER)                       | 20 per hour   |
+| Invitation revocations, status, settings  | 60 per hour   |
+| Creating schedules                        | 20 per hour   |
+| Cancelling schedules                      | 60 per hour   |
+| Saving or deleting contacts and templates | 120 per hour  |
+
+Counters are `RATE` items updated with one conditional `ADD` (allowed only
+while below the limit), so concurrent requests on different Lambda
+instances cannot exceed it; they expire through TTL. If the counter cannot
+be read or written, the action fails closed with the generic error.
+Scheduled occurrences call `sendEmail` from the scheduler function and are
+never rate limited. Sign-in keeps its own per-email throttle (five failures
+per 15 minutes). The limits sit far above what five people use and exist to
+stop a stolen session or a runaway script from flooding Gmail.
+
+### Daily limits and time zones (decision)
+
+Daily quotas stay on UTC days. Moving them to each user's local day would
+change the quota item key that M3's reservation transaction and every
+existing counter use, and a user's day would shift whenever their time
+zone did, either of which could release or double-count quota. The pages
+say "today (UTC)" everywhere the limits appear. Revisit only if a user
+needs it.
+
+### Schedule message privacy (decision)
+
+An `ACTIVE` schedule must keep its subject and body, because the function
+sends them later without the user present. Reviewed in M5 and kept:
+
+- Bodies exist only on `ACTIVE` schedules. Ending a schedule (completed,
+  failed, or cancelled) clears the body in the same write, and the ended
+  item expires 90 days later.
+- Send records and run records never contain a body. Audit events never
+  contain a subject or body.
+- The table is encrypted at rest and reachable only through the two
+  functions' roles; the OWNER has no view of another user's schedules.
+
+Encrypting bodies with KMS would add a KMS call to every schedule read for
+little gain against the table's own encryption and access controls, so the
+scheduler is not redesigned.
+
+### Security review
+
+Reviewed across M1–M5 for this milestone:
+
+- **Authentication.** Argon2id passwords; opaque session tokens stored as
+  hashes; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/admin` cookies;
+  absolute 7-day sessions invalidated on disable; uniform login errors;
+  per-email throttle; bootstrap token compared in constant time and only
+  while no OWNER exists.
+- **Authorization and IDOR.** Every page and action resolves the actor
+  from the session. Every per-user partition key (contacts, templates,
+  sends, quotas, schedules, runs, audit trails) is built from the session's
+  user ID; IDs from forms or URLs are looked up only inside that partition,
+  so another user's record looks missing. OWNER-only functions return
+  `null` or `forbidden` for anyone else. Covered by tests for history,
+  operation detail, retry, audit, dashboard, and the M1–M4 modules.
+- **Gmail.** Scopes stay `openid email gmail.send`; the ID token signature,
+  audience, issuer, nonce, and email are verified; refresh tokens are KMS
+  envelope-encrypted; access tokens are held only in memory for one
+  request; tokens, codes, and state are never logged, audited, or returned.
+- **Sending.** Quota reserved atomically before Gmail; per-recipient
+  idempotency; `UNCERTAIN` never resent; retry only through `sendEmail`;
+  no automatic retries; rate limits on every send path a user triggers.
+- **Scheduling.** Triggers carry only the schedule ID and time; the
+  function re-reads and re-validates everything, claims each occurrence
+  once, and now also enforces the scheduling switches.
+- **Input.** All forms and query strings are parsed on the server against
+  allowlists, lengths, and formats; result codes in URLs map to fixed
+  messages (`Object.hasOwn`), so no query text is rendered as a message.
+- **Secrets.** None in the repository; secrets reach Lambda as `NoEcho`
+  parameters; nothing is `NEXT_PUBLIC_`.
+- **Headers and routes.** `/admin` is noindex (metadata and
+  `X-Robots-Tag`), absent from navigation and the sitemap, never cached by
+  CloudFront, and Server Actions keep Next.js's Origin check with the site
+  host allowed.
+- **Infrastructure.** Unchanged in M5 and still least privilege: the
+  server role has item-level actions on the console table only, the
+  scheduler role cannot delete items, and the invoke role can invoke only
+  the scheduler function.
+
+### Production configuration
+
+M5 adds no variables. Production needs, all set through the deploy as in
+[`deployment.md`](deployment.md):
+
+| Name                        | Required value                                                 |
+| --------------------------- | -------------------------------------------------------------- |
+| `ADMIN_TABLE_NAME`          | Set by the template                                            |
+| `ADMIN_BOOTSTRAP_TOKEN`     | Secret, at least 32 characters, only while creating the OWNER  |
+| `GOOGLE_CLIENT_ID`          | The Google Web client's ID (environment variable)              |
+| `GOOGLE_CLIENT_SECRET`      | Its secret (environment secret, `NoEcho`)                      |
+| `GOOGLE_OAUTH_REDIRECT_URI` | `https://kshitijpal.in/admin/oauth/google/callback` (template) |
+| `GMAIL_TOKEN_KMS_KEY_ID`    | The `GmailTokenKey` ARN (template)                             |
+| `SCHEDULER_*`               | Set by the template                                            |
+
+Before going live: the redirect URI registered on the Google client must be
+exactly the value above; the Google app's consent screen must list only the
+`gmail.send` scope besides `openid` and `email`; `ADMIN_BOOTSTRAP_TOKEN`
+must be removed and redeployed after the OWNER exists; and the GitHub
+`production` environment must hold the secrets (nothing is committed). The
+Resend contact form's variables are unchanged.
 
 ## Logging
 
@@ -1145,9 +1414,22 @@ address, subject, body, user, or token.
   larger lists need several sends.
 - **Plain text only.** No HTML, attachments, display names, or `Reply-To`.
 - **A user's daily counters reset at 00:00 UTC**, not local midnight.
-- **Scheduled sends are not retried.** A failed or missed occurrence is
-  recorded; a one-time schedule then ends `FAILED`, and a recurring one
-  waits for its next occurrence.
+- **Scheduled sends are not retried automatically.** A failed or missed
+  occurrence is recorded; a one-time schedule then ends `FAILED`, and a
+  recurring one waits for its next occurrence. Its owner can retry a
+  failed occurrence by hand only while the schedule is `ACTIVE`, because
+  ended schedules no longer hold the message.
+- **Retrying an immediate send needs the message again**, since bodies are
+  never stored.
+- **Roles are fixed.** There is one OWNER and no promotion or demotion.
+- **History search reads at most 500 records per request.** Rare filters
+  over a long history may need "Continue searching".
+- **Audit writes are best effort.** If the table refuses a write, the
+  action still stands and only a fixed log line records the gap.
+- **The OWNER's administrative actions are in the OWNER's trail**, not the
+  affected user's; the OWNER sees both.
+- **Rate limits use fixed windows**, so up to twice a limit can pass around
+  a window boundary.
 - **No editing or pausing of schedules.** Cancel and create a new one.
 - **Late invocations are dropped.** If Scheduler invokes an occurrence
   more than an hour late, it is recorded as missed and not sent.

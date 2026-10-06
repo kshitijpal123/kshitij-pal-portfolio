@@ -470,6 +470,8 @@ describe("createDynamoStore", () => {
       bulkSendingEnabled: false,
       templatesEnabled: true,
       contactsEnabled: true,
+      schedulingEnabled: true,
+      recurringEnabled: false,
       dailyTotalEmails: 50,
       dailyBulkRecipients: 25,
       maxBulkRecipientsPerOperation: 10,
@@ -1119,5 +1121,128 @@ describe("DynamoDB schedules", () => {
     expect(
       Object.values(fallback.Update.ExpressionAttributeNames as object),
     ).not.toContain("status");
+  });
+});
+
+describe("DynamoDB store (M5)", () => {
+  it("pages a user's send records by key range, newest first", async () => {
+    const fake = client(() => ({
+      Items: [{ pk: "SEND#u1", sk: "x", id: "x", userId: "u1" }],
+      LastEvaluatedKey: { pk: "SEND#u1", sk: "x" },
+    }));
+    const store = createDynamoStore("table", fake);
+    const page = await store.listSendRecordsPage(
+      "u1",
+      { lower: "1", upper: "2~" },
+      { after: "1500", limit: 25 },
+    );
+    expect(page).toEqual({ items: [{ id: "x", userId: "u1" }], last: "x" });
+    expect(fake.calls()[0]).toBeInstanceOf(QueryCommand);
+    expect(fake.calls()[0].input).toMatchObject({
+      KeyConditionExpression: "pk = :pk AND sk BETWEEN :lower AND :upper",
+      ExpressionAttributeValues: {
+        ":pk": "SEND#u1",
+        ":lower": "1",
+        ":upper": "2~",
+      },
+      ScanIndexForward: false,
+      Limit: 25,
+      ExclusiveStartKey: { pk: "SEND#u1", sk: "1500" },
+    });
+
+    const last = createDynamoStore(
+      "table",
+      client(() => ({ Items: [] })),
+    );
+    expect(
+      await last.listSendRecordsPage(
+        "u1",
+        { lower: "0", upper: "~" },
+        { after: null, limit: 5 },
+      ),
+    ).toEqual({ items: [], last: null });
+  });
+
+  it("counts rate-limited uses atomically per window and expires them", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.consumeRateLimit("send:u1", 30, 600_000, now)).toBe(
+      true,
+    );
+    const windowStart = Math.floor(now.getTime() / 600_000) * 600_000;
+    expect(fake.calls()[0]).toBeInstanceOf(UpdateCommand);
+    expect(fake.calls()[0].input).toMatchObject({
+      Key: { pk: "RATE", sk: `send:u1#${windowStart}` },
+      UpdateExpression: "SET expiresAtEpoch = :ttl ADD #count :one",
+      ConditionExpression: "attribute_not_exists(#count) OR #count < :limit",
+      ExpressionAttributeValues: {
+        ":ttl": (windowStart + 600_000) / 1000,
+        ":one": 1,
+        ":limit": 30,
+      },
+    });
+
+    const full = createDynamoStore(
+      "table",
+      client(() => {
+        throw conditionFailure();
+      }),
+    );
+    expect(await full.consumeRateLimit("send:u1", 30, 600_000, now)).toBe(
+      false,
+    );
+    expect(await store.consumeRateLimit("send:u1", 0, 600_000, now)).toBe(
+      false,
+    );
+
+    const broken = createDynamoStore(
+      "table",
+      client(() => {
+        throw Object.assign(new Error("boom"), {
+          name: "ProvisionedThroughputExceededException",
+        });
+      }),
+    );
+    await expect(
+      broken.consumeRateLimit("send:u1", 30, 600_000, now),
+    ).rejects.toThrow("boom");
+  });
+
+  it("writes audit events once, with a one-year expiry, and pages them", async () => {
+    const event = {
+      id: `${now.toISOString()}#abcdefghijklmnop`,
+      subject: "u1",
+      actorId: "u1",
+      action: "send" as const,
+      outcome: "success" as const,
+      targetId: null,
+      detail: { sent: 1 },
+      at: now.toISOString(),
+    };
+    const fake = client((command) =>
+      command instanceof QueryCommand
+        ? { Items: [{ pk: "AUDIT#u1", sk: event.id, ...event }] }
+        : {},
+    );
+    const store = createDynamoStore("table", fake);
+    await store.appendAuditEvent(event);
+    expect(fake.calls()[0]).toBeInstanceOf(PutCommand);
+    expect(fake.calls()[0].input).toMatchObject({
+      Item: {
+        pk: "AUDIT#u1",
+        sk: event.id,
+        expiresAtEpoch: now.getTime() / 1000 + 365 * 24 * 60 * 60,
+      },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+    expect(
+      await store.listAuditEvents("u1", { after: null, limit: 50 }),
+    ).toEqual({ items: [event], last: null });
+    expect(fake.calls()[1].input).toMatchObject({
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: { ":pk": "AUDIT#u1" },
+      ScanIndexForward: false,
+      Limit: 50,
+    });
   });
 });

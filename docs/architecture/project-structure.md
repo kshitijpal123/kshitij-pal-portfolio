@@ -60,7 +60,8 @@ Exists:
   [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 - `/admin` and its sub-routes (`app/admin/`), the private mail console:
   `login`, `setup`, `invite/[token]`, `users`, `senders`, `approvals`,
-  `compose`, `contacts`, `templates`, and `schedules`, plus the Route Handler `oauth/google/callback` (Google's OAuth redirect
+  `compose`, `contacts`, `templates`, `schedules`, `history`,
+  `history/[operationId]`, `settings`, and `audit`, plus the Route Handler `oauth/google/callback` (Google's OAuth redirect
   target). They are dynamic, `noindex`, and never linked from public pages. See
   [`mail-console.md`](mail-console.md).
 
@@ -301,7 +302,8 @@ Both sections sit below the fold and reveal with the motion primitives.
 signed-in user, sign out), `PageHeading`, `ProfileSummary`, `OwnerOverview`,
 `UserList`, `InvitationList`, `SenderIdentityList`, `SenderReviewList`,
 `GmailAccountList`, `ContactList`, `TemplateList`, `SendHistory`,
-`ScheduleList`, `GmailReadiness`, `StatusBadge`, `AdminField`,
+`ScheduleList`, `GmailReadiness`, `DashboardOverview`, `AccountsOverview`,
+`StatusBadge`, `AdminField`,
 `AccountFields`, `FormStatus`, and `SubmitButton` are Server Components.
 The forms (`LoginForm`, `SetupForm`, `AcceptInvitationForm`, `InviteForm`,
 `SenderRequestForm`, `ContactForm`, `TemplateForm`, `UserSettingsForm`,

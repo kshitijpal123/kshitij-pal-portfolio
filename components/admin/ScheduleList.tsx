@@ -1,5 +1,6 @@
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Button } from "@/components/ui/Button";
+import { Link } from "@/components/ui/Link";
 import { cancelScheduleAction } from "@/lib/admin/actions";
 import { formatTimestamp } from "@/lib/admin/format";
 import type { Schedule } from "@/lib/admin/model";
@@ -86,6 +87,15 @@ export function ScheduleList({
                 {schedule.completedAt &&
                   ` · ended ${formatTimestamp(schedule.completedAt)}`}
               </p>
+              {schedule.runCount > 0 && (
+                <Link
+                  href={`/admin/history?schedule=${schedule.id}`}
+                  className="w-fit"
+                >
+                  Sends from this schedule{" "}
+                  <span className="sr-only">{schedule.subject}</span>
+                </Link>
+              )}
             </div>
             {schedule.status === "ACTIVE" && (
               <form action={cancelScheduleAction}>

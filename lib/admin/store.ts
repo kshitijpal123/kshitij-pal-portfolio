@@ -1,4 +1,5 @@
 import type {
+  AuditEvent,
   Contact,
   DailyUsage,
   EmailTemplate,
@@ -82,6 +83,15 @@ export type RunCompletion = {
 /** After an occurrence: the next one, or the schedule's final state. */
 export type ScheduleAdvance =
   { kind: "next"; nextRunAt: string } | { kind: "end"; end: ScheduleEnd };
+
+/** A page of a newest-first listing; `last` is where the next page starts. */
+export type Page<T> = { items: T[]; last: string | null };
+
+export type PageRequest = {
+  /** Exclusive: the sort key the previous page ended with. */
+  after: string | null;
+  limit: number;
+};
 
 export type CreateOwnerResult = "created" | "owner-exists";
 
@@ -238,6 +248,36 @@ export type AdminStore = {
   ): Promise<SendRecord[]>;
   /** Newest operations first. */
   listRecentSendRecords(userId: string, limit: number): Promise<SendRecord[]>;
+  /**
+   * One page of the user's send records, newest first, whose IDs lie
+   * between `lower` and `upper` (inclusive). IDs start with the operation's
+   * millisecond timestamp, so the bounds select a time range.
+   */
+  listSendRecordsPage(
+    userId: string,
+    range: { lower: string; upper: string },
+    page: PageRequest,
+  ): Promise<Page<SendRecord>>;
+
+  /**
+   * Counts one use of `key` in the fixed window of `windowMs` containing
+   * `now`, atomically; `false`, with nothing counted, once `limit` uses are
+   * already counted in that window.
+   */
+  consumeRateLimit(
+    key: string,
+    limit: number,
+    windowMs: number,
+    now: Date,
+  ): Promise<boolean>;
+
+  /** Audit trails are addressed by their subject: a user ID or `system`. */
+  appendAuditEvent(event: AuditEvent): Promise<void>;
+  /** Newest first. */
+  listAuditEvents(
+    subject: string,
+    page: PageRequest,
+  ): Promise<Page<AuditEvent>>;
 
   /*
    * Schedules (M4) are addressed by their owner like other mail data. Only

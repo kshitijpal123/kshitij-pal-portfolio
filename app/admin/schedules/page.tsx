@@ -100,6 +100,11 @@ export default async function SchedulesPage() {
               <p className="border-l-2 border-border-strong pl-3 text-body-sm">
                 Sending is turned off for your account by the owner.
               </p>
+            ) : !settings.schedulingEnabled ? (
+              <p className="border-l-2 border-border-strong pl-3 text-body-sm">
+                Scheduling is turned off for your account by the owner. Existing
+                schedules do not send while it is off.
+              </p>
             ) : full ? (
               <p className="border-l-2 border-border-strong pl-3 text-body-sm">
                 You have reached your limit of active schedules. Cancel one
@@ -132,6 +137,7 @@ export default async function SchedulesPage() {
                 timeZones={selectableTimeZones()}
                 windowDays={settings.maxFutureSchedulingWindowDays}
                 recurringAllowed={
+                  settings.recurringEnabled &&
                   counts.recurring < settings.maxRecurringSchedules
                 }
               />

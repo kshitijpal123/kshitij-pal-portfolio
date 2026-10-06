@@ -28,6 +28,10 @@ const variants: Record<string, BadgeVariant> = {
   ONE_TIME: "default",
   RECURRING: "default",
   SCHEDULED: "default",
+  SUCCESS: "accent",
+  FAILURE: "muted",
+  DENIED: "muted",
+  RATE_LIMITED: "default",
 };
 
 /** A role or status as text; the variant only reinforces it. */

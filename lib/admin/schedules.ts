@@ -54,6 +54,8 @@ export type ScheduleRejection =
   | {
       reason:
         | "not-configured"
+        | "scheduling-disabled"
+        | "recurring-disabled"
         | "start-too-soon"
         | "start-nonexistent"
         | "end-nonexistent"
@@ -138,6 +140,12 @@ export async function createSchedule(
   if (!triggers) return reject({ reason: "not-configured" });
 
   const settings = await getUserSettings(store, actor.id);
+  if (!settings.schedulingEnabled) {
+    return reject({ reason: "scheduling-disabled" });
+  }
+  if (input.type === "RECURRING" && !settings.recurringEnabled) {
+    return reject({ reason: "recurring-disabled" });
+  }
   const timing = resolveTiming(
     input,
     now,
@@ -300,6 +308,10 @@ export function describeScheduleRejection(
   switch (rejection.reason) {
     case "not-configured":
       return "Scheduling is not configured on this server. Nothing was scheduled.";
+    case "scheduling-disabled":
+      return "Scheduling is turned off for your account. Nothing was scheduled.";
+    case "recurring-disabled":
+      return "Repeating schedules are turned off for your account. Nothing was scheduled.";
     case "start-too-soon":
       return "Choose a time at least 2 minutes from now.";
     case "start-nonexistent":
@@ -336,6 +348,8 @@ const scheduleFailures: Record<ScheduleFailureCode, string> = {
   "not-attempted": "Not sent: sending stopped before this recipient.",
   "user-inactive": "Not sent: the account is not active.",
   "sending-disabled": "Not sent: sending is turned off for the account.",
+  "scheduling-disabled":
+    "Not sent: scheduling (or repeating schedules) is turned off for the account.",
   "sender-unavailable":
     "Not sent: the sender address is no longer approved for this account.",
   "contacts-disabled": "Not sent: contacts are turned off for the account.",

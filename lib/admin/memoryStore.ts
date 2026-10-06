@@ -1,4 +1,5 @@
 import {
+  type AuditEvent,
   type Contact,
   countUsedSeats,
   type DailyUsage,
@@ -16,7 +17,31 @@ import {
   type User,
   type UserSettings,
 } from "@/lib/admin/model";
-import type { AdminStore, ScheduleEnd } from "@/lib/admin/store";
+import type {
+  AdminStore,
+  Page,
+  PageRequest,
+  ScheduleEnd,
+} from "@/lib/admin/store";
+
+/** Newest first by `key`, after an exclusive cursor, like a DynamoDB page. */
+function pageOf<T>(
+  items: T[],
+  key: (item: T) => string,
+  { after, limit }: PageRequest,
+): Page<T> {
+  const sorted = items
+    .filter((item) => after === null || key(item) < after)
+    .sort((a, b) => key(b).localeCompare(key(a)));
+  const slice = sorted.slice(0, limit);
+  return {
+    items: slice,
+    last:
+      sorted.length > limit && slice.length > 0
+        ? key(slice[slice.length - 1])
+        : null,
+  };
+}
 
 /** Identities that hold their address, so no one else can request it. */
 const claimingStatuses = new Set(["REQUESTED", "APPROVED"]);
@@ -45,6 +70,9 @@ export function createMemoryStore(): AdminStore {
   const scheduleCounts = new Map<string, ScheduleCounts>();
   /** Keyed by `<userId> <scheduleId>#<occurrence>`. */
   const runs = new Map<string, ScheduleRun>();
+  /** Keyed by `<key>#<window start>`. */
+  const rateCounts = new Map<string, number>();
+  const auditEvents: AuditEvent[] = [];
 
   const copy = <T>(value: T): T => structuredClone(value);
   const owned = (userId: string, id: string) => `${userId} ${id}`;
@@ -409,6 +437,37 @@ export function createMemoryStore(): AdminStore {
         .sort((a, b) => b.id.localeCompare(a.id))
         .slice(0, limit)
         .map(copy);
+    },
+
+    async listSendRecordsPage(userId, { lower, upper }, page) {
+      const inRange = [...sends.values()].filter(
+        (record) =>
+          record.userId === userId && record.id >= lower && record.id <= upper,
+      );
+      const result = pageOf(inRange, (record) => record.id, page);
+      return { items: result.items.map(copy), last: result.last };
+    },
+
+    async consumeRateLimit(key, limit, windowMs, now) {
+      const windowStart = Math.floor(now.getTime() / windowMs) * windowMs;
+      const slot = `${key}#${windowStart}`;
+      const count = rateCounts.get(slot) ?? 0;
+      if (count >= limit) return false;
+      rateCounts.set(slot, count + 1);
+      return true;
+    },
+
+    async appendAuditEvent(event) {
+      auditEvents.push(copy(event));
+    },
+
+    async listAuditEvents(subject, page) {
+      const result = pageOf(
+        auditEvents.filter((event) => event.subject === subject),
+        (event) => event.id,
+        page,
+      );
+      return { items: result.items.map(copy), last: result.last };
     },
 
     async listSchedules(userId) {

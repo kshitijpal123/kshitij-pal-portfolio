@@ -226,6 +226,41 @@ describe("GET /admin/oauth/google/callback", () => {
     expect(logs).toEqual(["[admin] Gmail connection failed (Error)."]);
   });
 
+  it("audits the result code only, never the code, state, or tokens", async () => {
+    const context = await setup();
+    signIn(context.alice.token);
+    await GET(request({ state: context.state, code: "auth-code-SECRET" }));
+    await GET(request({ state: context.state, code: "auth-code-SECRET" }));
+    const trail = await context.store.listAuditEvents(context.alice.user.id, {
+      after: null,
+      limit: 10,
+    });
+    expect(trail.items).toHaveLength(2);
+    expect(trail.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "gmail.connect",
+          outcome: "failure",
+          detail: { result: "invalid-state" },
+        }),
+        expect.objectContaining({
+          action: "gmail.connect",
+          outcome: "success",
+          detail: { result: "connected" },
+        }),
+      ]),
+    );
+    const stored = JSON.stringify(trail);
+    for (const secret of [
+      "auth-code-SECRET",
+      context.state,
+      refreshToken,
+      accessToken,
+    ]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
   it("is dated by the server clock, not the query", async () => {
     vi.useFakeTimers({
       now: new Date(now.getTime() + 60 * 60 * 1000),

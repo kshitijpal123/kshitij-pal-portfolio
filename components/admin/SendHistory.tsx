@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import { Link } from "@/components/ui/Link";
 import { formatTimestamp } from "@/lib/admin/format";
 import type { SendRecord } from "@/lib/admin/model";
 import { describeFailureCode } from "@/lib/admin/sending";
@@ -11,12 +12,16 @@ function detail(record: SendRecord) {
   return record.failureCode ? describeFailureCode(record.failureCode) : null;
 }
 
-/** The signed-in user's recent sends: recipient, subject, and outcome only. */
-export function SendHistory({ records }: { records: SendRecord[] }) {
+/** The signed-in user's sends: recipient, subject, and outcome only. */
+export function SendHistory({
+  records,
+  emptyMessage = "Nothing sent yet.",
+}: {
+  records: SendRecord[];
+  emptyMessage?: string;
+}) {
   if (records.length === 0) {
-    return (
-      <p className="text-body-sm text-muted-foreground">Nothing sent yet.</p>
-    );
+    return <p className="text-body-sm text-muted-foreground">{emptyMessage}</p>;
   }
 
   return (
@@ -39,6 +44,14 @@ export function SendHistory({ records }: { records: SendRecord[] }) {
               {formatTimestamp(record.completedAt ?? record.createdAt)}
             </p>
             {note && <p className="text-muted-foreground">{note}</p>}
+            <Link
+              href={`/admin/history/${record.operationId}`}
+              variant="subtle"
+              className="w-fit text-caption"
+            >
+              Operation details{" "}
+              <span className="sr-only">for {record.recipient}</span>
+            </Link>
           </li>
         );
       })}

@@ -1,3 +1,4 @@
+import { recordAudit, systemAuditSubject } from "@/lib/admin/audit";
 import {
   type PublicUser,
   sessionTtlMs,
@@ -107,6 +108,25 @@ export async function login(
   );
   if (!user || !passwordMatches || user.status !== "ACTIVE") {
     await store.recordFailedAttempt(key, now, attemptWindowMs);
+    // An unknown address goes to the system trail without the address.
+    await recordAudit(
+      store,
+      {
+        subject: user?.id ?? systemAuditSubject,
+        actorId: null,
+        action: "auth.login",
+        outcome: "failure",
+        targetId: user?.id ?? null,
+        detail: {
+          reason: !user
+            ? "unknown-account"
+            : !passwordMatches
+              ? "wrong-password"
+              : "account-disabled",
+        },
+      },
+      now,
+    );
     return { ok: false, reason: "invalid" };
   }
 
@@ -114,6 +134,17 @@ export async function login(
   const at = now.toISOString();
   await store.recordLogin(user.id, at);
   const session = await startSession(store, user.id, now);
+  await recordAudit(
+    store,
+    {
+      subject: user.id,
+      actorId: user.id,
+      action: "auth.login",
+      outcome: "success",
+      targetId: user.id,
+    },
+    now,
+  );
   return {
     ok: true,
     user: toPublicUser({ ...user, lastLoginAt: at }),

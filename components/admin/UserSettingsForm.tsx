@@ -14,6 +14,8 @@ const flags = [
   { name: "bulkSendingEnabled", label: "Bulk sending" },
   { name: "contactsEnabled", label: "Contacts" },
   { name: "templatesEnabled", label: "Templates" },
+  { name: "schedulingEnabled", label: "Scheduling" },
+  { name: "recurringEnabled", label: "Repeating schedules" },
 ] as const;
 
 const limits = [

@@ -471,6 +471,8 @@ export type SettingsInput = {
   bulkSendingEnabled: boolean;
   templatesEnabled: boolean;
   contactsEnabled: boolean;
+  schedulingEnabled: boolean;
+  recurringEnabled: boolean;
   dailyTotalEmails: number;
   dailyBulkRecipients: number;
   maxBulkRecipientsPerOperation: number;
@@ -500,9 +502,26 @@ export function validateSettings(input: FormData) {
       bulkSendingEnabled: flag("bulkSendingEnabled"),
       templatesEnabled: flag("templatesEnabled"),
       contactsEnabled: flag("contactsEnabled"),
+      schedulingEnabled: flag("schedulingEnabled"),
+      recurringEnabled: flag("recurringEnabled"),
       ...limits,
     },
     errors,
+  );
+}
+
+export type RetryMessage = { subject: string; body: string };
+
+/**
+ * The message re-entered to retry an immediate send, whose body was never
+ * stored. Recipients, sender, and template come from the stored records.
+ */
+export function validateRetryMessage(input: FormData) {
+  const subject = readSubject(input);
+  const body = normalizeText(readField(input, "body"));
+  return finish<"subject" | "body", RetryMessage>(
+    { subject, body },
+    { subject: validateSubject(subject), body: validateBody(body) },
   );
 }
 

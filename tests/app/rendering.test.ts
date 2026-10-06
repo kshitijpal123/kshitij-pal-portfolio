@@ -60,7 +60,7 @@ describe("private console rendering", () => {
     const pages = sourceFiles("app/admin").filter((file) =>
       file.endsWith("/page.tsx"),
     );
-    expect(pages).toHaveLength(11);
+    expect(pages).toHaveLength(15);
     for (const file of pages) {
       expect(readFileSync(file, "utf8"), file).toMatch(
         /from "@\/lib\/admin\/session"/,

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { recordAudit } from "@/lib/admin/audit";
 import {
   type Schedule,
   type ScheduleFailureCode,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/admin/scheduler";
 import { occurrenceLatenessMs } from "@/lib/admin/schedules";
 import { type SendDeps, sendEmail } from "@/lib/admin/sending";
+import { getUserSettings } from "@/lib/admin/settings";
 import type { RunCompletion, ScheduleAdvance } from "@/lib/admin/store";
 
 /*
@@ -132,6 +134,7 @@ export type FailureCategory =
 const categories: Record<ScheduleFailureCode, FailureCategory> = {
   "user-inactive": "AUTHORIZATION",
   "sending-disabled": "AUTHORIZATION",
+  "scheduling-disabled": "AUTHORIZATION",
   "sender-unavailable": "AUTHORIZATION",
   "not-connected": "AUTHORIZATION",
   "reauth-required": "AUTHORIZATION",
@@ -196,6 +199,14 @@ async function runOccurrence(
   }
   const user = await deps.store.getUserById(schedule.userId);
   if (!user) return failure("user-inactive", now.toISOString());
+  // The OWNER's switches apply to every occurrence, not only at creation.
+  const settings = await getUserSettings(deps.store, schedule.userId);
+  if (
+    !settings.schedulingEnabled ||
+    (schedule.type === "RECURRING" && !settings.recurringEnabled)
+  ) {
+    return failure("scheduling-disabled", now.toISOString());
+  }
 
   let outcome;
   try {
@@ -384,5 +395,26 @@ export async function executeScheduledOccurrence(
   if (advance.kind === "end" && schedule.type === "RECURRING") {
     await removeTrigger(schedule);
   }
+  await recordAudit(
+    store,
+    {
+      subject: schedule.userId,
+      actorId: null,
+      action: "schedule.run",
+      outcome: completion.status === "SENT" ? "success" : "failure",
+      targetId: schedule.id,
+      detail: {
+        type: schedule.type,
+        occurrence,
+        status: completion.status,
+        failureCode: completion.failureCode,
+        category: failureCategory(completion.status, completion.failureCode),
+        sent: completion.sent,
+        failed: completion.failed,
+        uncertain: completion.uncertain,
+      },
+    },
+    deps.clock?.() ?? now,
+  );
   return { outcome: completion.status, failureCode: completion.failureCode };
 }

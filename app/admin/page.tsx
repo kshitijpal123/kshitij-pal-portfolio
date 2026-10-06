@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
+import { AccountsOverview } from "@/components/admin/AccountsOverview";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { DashboardOverview } from "@/components/admin/DashboardOverview";
 import { FormStatus } from "@/components/admin/FormStatus";
 import { GmailAccountList } from "@/components/admin/GmailAccountList";
 import { OwnerOverview } from "@/components/admin/OwnerOverview";
 import { PageHeading } from "@/components/admin/PageHeading";
 import { ProfileSummary } from "@/components/admin/ProfileSummary";
 import { getAdminStore } from "@/lib/admin/getAdminStore";
-import { gmailNotice, listGmailAccounts } from "@/lib/admin/gmailConnections";
+import { getDashboard, getOwnerDashboard } from "@/lib/admin/dashboard";
+import { gmailNotice } from "@/lib/admin/gmailConnections";
 import { listSenderIdentitiesForReview } from "@/lib/admin/senderIdentities";
 import { requireUser } from "@/lib/admin/session";
 import { getUserAdministration } from "@/lib/admin/users";
@@ -18,13 +21,16 @@ export default async function DashboardPage({
 }: PageProps<"/admin">) {
   const user = await requireUser();
   const store = getAdminStore();
-  const [administration, senderRequests, gmailAccounts, query] =
+  const now = new Date();
+  const [administration, senderRequests, dashboard, ownerDashboard, query] =
     await Promise.all([
-      getUserAdministration(store, user, new Date()),
+      getUserAdministration(store, user, now),
       listSenderIdentitiesForReview(store, user),
-      listGmailAccounts(store, user),
+      getDashboard(store, user, now),
+      getOwnerDashboard(store, user, now),
       searchParams,
     ]);
+  const gmailAccounts = dashboard.gmailAccounts;
   const notice = gmailNotice(query.gmail);
 
   return (
@@ -37,6 +43,7 @@ export default async function DashboardPage({
           </p>
         </PageHeading>
         <ProfileSummary user={user} />
+        <DashboardOverview dashboard={dashboard} now={now} />
         <section aria-labelledby="gmail-heading">
           <h2 id="gmail-heading" className="text-h3">
             Gmail accounts
@@ -62,6 +69,7 @@ export default async function DashboardPage({
             }
           />
         )}
+        {ownerDashboard && <AccountsOverview overview={ownerDashboard} />}
       </div>
     </AdminShell>
   );

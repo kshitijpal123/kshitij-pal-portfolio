@@ -244,6 +244,10 @@ export type UserSettings = {
   bulkSendingEnabled: boolean;
   templatesEnabled: boolean;
   contactsEnabled: boolean;
+  /** May create schedules; while off, occurrences do not send either. */
+  schedulingEnabled: boolean;
+  /** May create recurring schedules; while off, their occurrences fail. */
+  recurringEnabled: boolean;
   /** Emails per UTC day, individual and bulk together. */
   dailyTotalEmails: number;
   /** Recipients of bulk sends per UTC day. */
@@ -376,6 +380,7 @@ export type Recurrence = RecurrenceRule & { time: string };
 export type ScheduleFailureCode =
   | "user-inactive"
   | "sending-disabled"
+  | "scheduling-disabled"
   | "sender-unavailable"
   | "not-connected"
   | "reauth-required"
@@ -472,3 +477,48 @@ export type ScheduleRun = {
 };
 
 export type ScheduleCounts = { active: number; recurring: number };
+
+export type AuditAction =
+  | "auth.login"
+  | "auth.logout"
+  | "auth.setup"
+  | "invitation.create"
+  | "invitation.revoke"
+  | "invitation.accept"
+  | "user.status"
+  | "sender.request"
+  | "sender.review"
+  | "gmail.connect-start"
+  | "gmail.connect"
+  | "gmail.check"
+  | "gmail.disconnect"
+  | "settings.update"
+  | "send"
+  | "send.retry"
+  | "schedule.create"
+  | "schedule.cancel"
+  | "schedule.run";
+
+/** `denied`: refused by authorization; `rate-limited`: refused by a limit. */
+export type AuditOutcome = "success" | "failure" | "denied" | "rate-limited";
+
+export type AuditDetailValue = string | number | boolean | null;
+
+/**
+ * One security- or administration-relevant event. Metadata only: IDs,
+ * counts, result codes, and settings values; never a secret, token,
+ * password, message subject or body, or email address.
+ */
+export type AuditEvent = {
+  /** `<ISO timestamp>#<random>`, so a trail sorts by time. */
+  id: string;
+  /** Whose trail it belongs to: a user ID, or `system` without an account. */
+  subject: string;
+  /** The signed-in user who acted; `null` for the scheduler or anonymous. */
+  actorId: string | null;
+  action: AuditAction;
+  outcome: AuditOutcome;
+  targetId: string | null;
+  detail: Record<string, AuditDetailValue>;
+  at: string;
+};
