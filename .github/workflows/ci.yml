@@ -109,22 +109,6 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Inspect bootstrap CloudFormation role
-        run: |
-          echo "Checking portfolio-bootstrap CloudFormation execution role..."
-
-          aws cloudformation describe-stack-resources \
-            --region "$AWS_REGION" \
-            --stack-name portfolio-bootstrap \
-            --query "StackResources[?LogicalResourceId=='CloudFormationExecutionRole'].[LogicalResourceId,PhysicalResourceId,ResourceStatus]" \
-            --output table
-
-          echo "Checking deployed IAM inline policies..."
-
-          aws iam list-role-policies \
-            --role-name cfn-exec-portfolio-production \
-            --output table
-
       # Assets go up before the new server so fresh HTML never references a
       # missing file. Old hashed files are kept for pages still cached.
       - name: Upload static assets (existing stack)
