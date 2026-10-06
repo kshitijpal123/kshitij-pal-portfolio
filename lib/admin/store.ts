@@ -5,6 +5,12 @@ import type {
   GmailConnection,
   Invitation,
   OAuthState,
+  Schedule,
+  ScheduleCounts,
+  ScheduleFailureCode,
+  ScheduleRun,
+  ScheduleRunStatus,
+  ScheduleStatus,
   SendFailureCode,
   SendRecord,
   SenderIdentity,
@@ -42,6 +48,40 @@ export type SendCompletion =
       failureCode: SendFailureCode;
       at: string;
     };
+
+export type ScheduleLimits = Pick<
+  UserSettings,
+  "maxScheduledEmails" | "maxRecurringSchedules"
+>;
+
+/** `limit`: an active-schedule limit would be exceeded; nothing written. */
+export type CreateScheduleResult = "created" | "limit";
+
+/** A final state for an ACTIVE schedule. */
+export type ScheduleEnd = {
+  status: Exclude<ScheduleStatus, "ACTIVE">;
+  at: string;
+  failureCode: ScheduleFailureCode | null;
+};
+
+/**
+ * `duplicate`: this occurrence was already claimed (whatever its outcome).
+ * `not-active`: the schedule is no longer ACTIVE; nothing was written.
+ */
+export type ClaimRunResult = "claimed" | "duplicate" | "not-active";
+
+export type RunCompletion = {
+  status: Exclude<ScheduleRunStatus, "RESERVED">;
+  failureCode: ScheduleFailureCode | null;
+  sent: number;
+  failed: number;
+  uncertain: number;
+  at: string;
+};
+
+/** After an occurrence: the next one, or the schedule's final state. */
+export type ScheduleAdvance =
+  { kind: "next"; nextRunAt: string } | { kind: "end"; end: ScheduleEnd };
 
 export type CreateOwnerResult = "created" | "owner-exists";
 
@@ -198,4 +238,50 @@ export type AdminStore = {
   ): Promise<SendRecord[]>;
   /** Newest operations first. */
   listRecentSendRecords(userId: string, limit: number): Promise<SendRecord[]>;
+
+  /*
+   * Schedules (M4) are addressed by their owner like other mail data. Only
+   * `findSchedule`, used by the scheduler's execution function, which knows
+   * nothing but a schedule ID, looks one up without the owner.
+   */
+  listSchedules(userId: string): Promise<Schedule[]>;
+  getSchedule(userId: string, scheduleId: string): Promise<Schedule | null>;
+  findSchedule(scheduleId: string): Promise<Schedule | null>;
+  getScheduleCounts(userId: string): Promise<ScheduleCounts>;
+  /**
+   * Inserts an ACTIVE schedule and counts it against the owner's active
+   * (and, if recurring, recurring) limits in one atomic step; concurrent
+   * creations can never exceed a limit.
+   */
+  createSchedule(
+    schedule: Schedule,
+    limits: ScheduleLimits,
+  ): Promise<CreateScheduleResult>;
+  /**
+   * Moves an ACTIVE schedule to a final state and releases its count, in one
+   * step. `false` when it was no longer ACTIVE.
+   */
+  endSchedule(schedule: Schedule, end: ScheduleEnd): Promise<boolean>;
+  /**
+   * Creates the RESERVED run for an occurrence, only if the occurrence was
+   * never claimed and the schedule is still ACTIVE, in one step.
+   */
+  claimScheduleRun(run: ScheduleRun): Promise<ClaimRunResult>;
+  getScheduleRun(
+    userId: string,
+    scheduleId: string,
+    occurrence: string,
+  ): Promise<ScheduleRun | null>;
+  /**
+   * Finalizes a RESERVED run and, while the schedule is still ACTIVE,
+   * records it on the schedule and applies `advance` (releasing the count
+   * when the schedule ends), atomically. A schedule cancelled meanwhile
+   * keeps its status but still records the run's outcome.
+   */
+  finishScheduleRun(
+    schedule: Schedule,
+    run: ScheduleRun,
+    completion: RunCompletion,
+    advance: ScheduleAdvance,
+  ): Promise<void>;
 };

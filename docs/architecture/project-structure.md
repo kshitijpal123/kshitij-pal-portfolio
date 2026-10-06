@@ -59,8 +59,8 @@ Exists:
   prerendered metadata routes, and `app/not-found.tsx`, the 404 page. See
   [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 - `/admin` and its sub-routes (`app/admin/`), the private mail console:
-  `login`, `setup`, `invite/[token]`, `users`, `senders`, and `approvals`,
-  plus the Route Handler `oauth/google/callback` (Google's OAuth redirect
+  `login`, `setup`, `invite/[token]`, `users`, `senders`, `approvals`,
+  `compose`, `contacts`, `templates`, and `schedules`, plus the Route Handler `oauth/google/callback` (Google's OAuth redirect
   target). They are dynamic, `noindex`, and never linked from public pages. See
   [`mail-console.md`](mail-console.md).
 
@@ -301,11 +301,12 @@ Both sections sit below the fold and reveal with the motion primitives.
 signed-in user, sign out), `PageHeading`, `ProfileSummary`, `OwnerOverview`,
 `UserList`, `InvitationList`, `SenderIdentityList`, `SenderReviewList`,
 `GmailAccountList`, `ContactList`, `TemplateList`, `SendHistory`,
-`GmailReadiness`, `StatusBadge`, `AdminField`, `AccountFields`,
-`FormStatus`, and `SubmitButton` are Server Components. The forms
-(`LoginForm`, `SetupForm`, `AcceptInvitationForm`, `InviteForm`,
-`SenderRequestForm`, `ContactForm`, `TemplateForm`, `UserSettingsForm`, and
-`ComposeForm`, which also renders the personalized preview) are Client
+`ScheduleList`, `GmailReadiness`, `StatusBadge`, `AdminField`,
+`AccountFields`, `FormStatus`, and `SubmitButton` are Server Components.
+The forms (`LoginForm`, `SetupForm`, `AcceptInvitationForm`, `InviteForm`,
+`SenderRequestForm`, `ContactForm`, `TemplateForm`, `UserSettingsForm`,
+`ComposeForm`, which also renders the personalized preview, and
+`ScheduleForm`, which reuses `ComposeForm`'s fields) are Client
 Components that submit a Server Action from `lib/admin/actions.ts` with
 `useActionState`; the only other one,
 `GmailConnectButton`, shows a pending label with `useFormStatus` while the
@@ -329,17 +330,17 @@ Rules:
 `lib/` holds non-UI code. Directories are created when their first module is
 written.
 
-| Directory        | Responsibility                                                    |
-| ---------------- | ----------------------------------------------------------------- |
-| `lib/content/`   | MDX/content loading and content utilities                         |
-| `lib/contact/`   | Contact form validation, email rendering, rate limit, delivery    |
-| `lib/admin/`     | Mail console domain, auth, sessions, stores, Gmail OAuth, actions |
-| `lib/seo/`       | Site URL, metadata, structured data, sitemap, and robots          |
-| `lib/analytics/` | Analytics integration helpers                                     |
-| `lib/site/`      | Site configuration and structured data (experience, current work) |
-| `lib/theme/`     | Theme preference storage and initialization                       |
-| `lib/motion/`    | Motion tokens and shared Motion for React variants                |
-| `lib/utils/`     | Small reusable utilities that don't belong elsewhere              |
+| Directory        | Responsibility                                                         |
+| ---------------- | ---------------------------------------------------------------------- |
+| `lib/content/`   | MDX/content loading and content utilities                              |
+| `lib/contact/`   | Contact form validation, email rendering, rate limit, delivery         |
+| `lib/admin/`     | Mail console domain, auth, sessions, stores, Gmail, schedules, actions |
+| `lib/seo/`       | Site URL, metadata, structured data, sitemap, and robots               |
+| `lib/analytics/` | Analytics integration helpers                                          |
+| `lib/site/`      | Site configuration and structured data (experience, current work)      |
+| `lib/theme/`     | Theme preference storage and initialization                            |
+| `lib/motion/`    | Motion tokens and shared Motion for React variants                     |
+| `lib/utils/`     | Small reusable utilities that don't belong elsewhere                   |
 
 `lib/utils/` is a last resort. Code that belongs to a domain (content, SEO,
 analytics) lives in that domain's directory.
@@ -570,12 +571,13 @@ the About header's side column.
 `infra/` holds the AWS deployment, described in
 [`deployment.md`](deployment.md):
 
-| File                 | Purpose                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `portfolio.yaml`     | Application stack: CloudFront, Lambda, function URL, S3 assets, log group, console table, Gmail token KMS key |
-| `bootstrap.yaml`     | One-time stack: GitHub OIDC trust, deploy and CloudFormation roles                                            |
-| `package-server.mts` | Assembles `.aws-build/server` (the Lambda package) after `next build`                                         |
-| `lambda/run.sh`      | Lambda handler; starts `server.js` behind the Lambda Web Adapter                                              |
+| File                    | Purpose                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `portfolio.yaml`        | Application stack: CloudFront, Lambda, function URL, S3 assets, log groups, console table, Gmail token KMS key, schedule group, scheduler function and roles |
+| `bootstrap.yaml`        | One-time stack: GitHub OIDC trust, deploy and CloudFormation roles                                                                                           |
+| `package-server.mts`    | Assembles `.aws-build/server` (the Lambda package) after `next build`                                                                                        |
+| `package-scheduler.mts` | Bundles `lib/admin/scheduleHandler.ts` into `.aws-build/scheduler` with esbuild                                                                              |
+| `lambda/run.sh`         | Lambda handler; starts `server.js` behind the Lambda Web Adapter                                                                                             |
 
 `.aws-build/` is generated and git-ignored.
 
@@ -603,8 +605,9 @@ and IAM scope. Console tests run the domain modules against the memory
 store, with `tests/helpers/admin.ts` seeding an OWNER and users, and mock
 the Next.js request APIs with `tests/helpers/nextRequest.ts`. Gmail tests
 use the fake Google client in `tests/helpers/gmail.ts`, and sending tests
-the connected-sender seed and fake Gmail API in `tests/helpers/mail.ts`; no
-test calls Google or AWS.
+the connected-sender seed and fake Gmail API in `tests/helpers/mail.ts`;
+schedule tests use `tests/helpers/schedule.ts`, which records trigger calls
+in place of EventBridge Scheduler. No test calls Google or AWS.
 
 ## Imports
 

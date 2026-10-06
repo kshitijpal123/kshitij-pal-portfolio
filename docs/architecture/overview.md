@@ -26,10 +26,11 @@ form" below).
 
 The same application also hosts a private, invitation-only mail console
 under `/admin`. It has its own authentication, roles, and a DynamoDB table,
-and is not linked from or indexed with the public site. Milestones 1–3 of
+and is not linked from or indexed with the public site. Milestones 1–4 of
 the console (accounts, invitations, sender identity approval, Gmail account
-connection through Google OAuth, contacts, templates, and explicit
-individual and bulk sending through Gmail) exist. See
+connection through Google OAuth, contacts, templates, explicit individual
+and bulk sending through Gmail, and one-time and recurring scheduled sends
+triggered by EventBridge Scheduler) exist. See
 [`mail-console.md`](mail-console.md).
 
 ## Layers
@@ -52,12 +53,16 @@ Environment variables are introduced only when a feature requires them: the
 three contact form settings, `SITE_URL` (the canonical origin), and the
 console's `ADMIN_TABLE_NAME`, `ADMIN_BOOTSTRAP_TOKEN`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and
-`GMAIL_TOKEN_KMS_KEY_ID`, all in `.env.example`.
+`GMAIL_TOKEN_KMS_KEY_ID`, all in `.env.example`. Scheduled sends add
+`SCHEDULER_GROUP_NAME`, `SCHEDULER_TARGET_ARN`, and `SCHEDULER_ROLE_ARN`,
+set only by the production template.
 
 Production runs on AWS at `https://kshitijpal.in`: CloudFront in front of
 the Next.js standalone server on Lambda (through the AWS Lambda Web Adapter)
 and an S3 bucket for `/_next/static`, defined in CloudFormation under
-`infra/` and deployed by GitHub Actions on every push to `main`.
+`infra/` and deployed by GitHub Actions on every push to `main`. The
+console's scheduled sends add EventBridge Scheduler and a second,
+short-lived Lambda function that runs only when a send is due.
 Architecture, setup, caching, the custom domain,
 secrets, and operations: [`deployment.md`](deployment.md); the choice is
 recorded in [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).

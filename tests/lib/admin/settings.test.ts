@@ -35,6 +35,9 @@ describe("user settings", () => {
       dailyTotalEmails: 50,
       dailyBulkRecipients: 25,
       maxBulkRecipientsPerOperation: 10,
+      maxScheduledEmails: 20,
+      maxRecurringSchedules: 5,
+      maxFutureSchedulingWindowDays: 30,
     });
     expect(await getUserSettings(store, user.id)).toEqual({
       userId: user.id,
@@ -101,6 +104,9 @@ describe("validateSettings", () => {
     dailyTotalEmails: "50",
     dailyBulkRecipients: "25",
     maxBulkRecipientsPerOperation: "10",
+    maxScheduledEmails: "20",
+    maxRecurringSchedules: "5",
+    maxFutureSchedulingWindowDays: "30",
   };
 
   it("reads checkboxes and whole numbers", () => {
@@ -114,6 +120,9 @@ describe("validateSettings", () => {
         dailyTotalEmails: 50,
         dailyBulkRecipients: 25,
         maxBulkRecipientsPerOperation: 10,
+        maxScheduledEmails: 20,
+        maxRecurringSchedules: 5,
+        maxFutureSchedulingWindowDays: 30,
       },
     });
   });
@@ -127,6 +136,10 @@ describe("validateSettings", () => {
       ["maxBulkRecipientsPerOperation", "21"],
       ["maxBulkRecipientsPerOperation", "1e1"],
       ["dailyTotalEmails", ""],
+      ["maxScheduledEmails", "101"],
+      ["maxRecurringSchedules", "21"],
+      ["maxFutureSchedulingWindowDays", "0"],
+      ["maxFutureSchedulingWindowDays", "366"],
     ]) {
       const result = validateSettings(form({ ...valid, [field]: value }));
       expect(result.success, `${field}=${value}`).toBe(false);

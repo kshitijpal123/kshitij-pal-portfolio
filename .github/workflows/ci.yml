@@ -30,6 +30,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - name: Bundle scheduler function
+        run: node infra/package-scheduler.mts
 
   deploy:
     needs: verify
@@ -89,6 +91,9 @@ jobs:
 
       - name: Assemble Lambda package
         run: node infra/package-server.mts
+
+      - name: Bundle scheduler function
+        run: node infra/package-scheduler.mts
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

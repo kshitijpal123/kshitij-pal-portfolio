@@ -1,11 +1,14 @@
 # Private Mail Console
 
-Status: Milestone 3 of the console. Milestone 1 (foundation) built
+Status: Milestone 4 of the console. Milestone 1 (foundation) built
 authentication, users, roles, invitations, the five-user limit, the OWNER
 bootstrap, and sender identity approval. Milestone 2 added Gmail account
-connection through Google OAuth (see "Gmail connection"). Milestone 3 adds
+connection through Google OAuth (see "Gmail connection"). Milestone 3 added
 contacts, templates, and explicit individual and bulk sending through the
 connected Gmail accounts (see "Contacts and templates" and "Sending").
+Milestone 4 adds one-time and recurring scheduled sends, triggered by
+EventBridge Scheduler and sent through the same M3 sending path (see
+"Scheduled sending").
 
 Approved sender identity does not mean Gmail authorization, and Gmail
 authorization does not mean approval. Sending needs both.
@@ -39,6 +42,7 @@ untouched.
 | Connect, check, disconnect own Gmail accounts  | Yes   | Yes  |
 | Manage own contacts and templates              | Yes   | Yes  |
 | Send from own approved, connected addresses    | Yes   | Yes  |
+| Schedule, view, and cancel own scheduled sends | Yes   | Yes  |
 | See all users, invitations, and seat usage     | Yes   | No   |
 | Set each user's feature switches and limits    | Yes   | No   |
 | Invite and revoke invitations                  | Yes   | No   |
@@ -62,6 +66,7 @@ itself, and USER-status changes never apply to the OWNER.
 | `/admin/senders`        | Signed in                        | Request and track own sender identities               |
 | `/admin/approvals`      | OWNER                            | Review sender identity requests                       |
 | `/admin/compose`        | Signed in                        | Compose, preview, send; today's limits; recent sends  |
+| `/admin/schedules`      | Signed in                        | Schedule a send; own schedules; cancel; limits        |
 | `/admin/contacts`       | Signed in                        | Own contacts: add, edit, delete, search (`?q=`)       |
 | `/admin/templates`      | Signed in                        | Own templates: add, edit, delete                      |
 
@@ -105,6 +110,11 @@ lib/admin/
   mimeMessage.ts     RFC 2822 / MIME message building, base64url encoding
   gmailApi.ts        Gmail users.messages.send client and error classes
   sending.ts         The send flow: checks, reservation, Gmail calls, results
+  recurrence.ts      IANA time zones, local/UTC conversion, recurrence rules
+  schedules.ts       Own schedules: create, list, cancel, display status
+  scheduler.ts       EventBridge Scheduler triggers: create and delete
+  scheduleExecution.ts  One scheduled occurrence: validate, claim, send
+  scheduleHandler.ts The scheduler Lambda's entry point (bundled separately)
   session.ts         Cookies and requireUser / requireOwner (request scope)
   actions.ts         Server Actions: thin wrappers over the modules above
 ```
@@ -200,6 +210,15 @@ Milestone 3 adds per-user partitions:
 | `TEMPLATE#<userId>`      | template ID    | Template                             |
 | `QUOTA#<userId>`         | UTC day        | `total`, `bulk` counters; TTL 8 days |
 | `SEND#<userId>`          | operation:hash | Send record; TTL 90 days             |
+
+Milestone 4 adds:
+
+| `pk`                    | `sk`                  | Item                                           |
+| ----------------------- | --------------------- | ---------------------------------------------- |
+| `SCHEDULE#<userId>`     | schedule ID           | Schedule; TTL 90 days once it ends             |
+| `SCHEDULE_ID`           | schedule ID           | Owner pointer for the execution function       |
+| `SCHEDULE_COUNT`        | user ID               | `active`, `recurring` counters                 |
+| `SCHEDULE_RUN#<userId>` | scheduleId#local time | One occurrence's claim and result; TTL 90 days |
 
 Each collection is one partition, which is ample for five users and keeps
 listing a `Query` (no `Scan`). Reads that decide authorization are strongly
@@ -565,15 +584,18 @@ Each user has one `SETTINGS` item, written only by the OWNER from
 `/admin/users`. A user without one gets the defaults
 (`defaultUserSettings` in `lib/admin/settings.ts`):
 
-| Setting                         | Default | Range | Meaning                                     |
-| ------------------------------- | ------- | ----- | ------------------------------------------- |
-| `sendingEnabled`                | on      |       | May send at all                             |
-| `bulkSendingEnabled`            | on      |       | May send to more than one recipient at once |
-| `templatesEnabled`              | on      |       | May use templates                           |
-| `contactsEnabled`               | on      |       | May use contacts                            |
-| `dailyTotalEmails`              | 50      | 0–500 | Emails per UTC day, individual and bulk     |
-| `dailyBulkRecipients`           | 25      | 0–500 | Recipients of bulk sends per UTC day        |
-| `maxBulkRecipientsPerOperation` | 10      | 1–20  | Recipients in one bulk send                 |
+| Setting                         | Default | Range | Meaning                                      |
+| ------------------------------- | ------- | ----- | -------------------------------------------- |
+| `sendingEnabled`                | on      |       | May send at all                              |
+| `bulkSendingEnabled`            | on      |       | May send to more than one recipient at once  |
+| `templatesEnabled`              | on      |       | May use templates                            |
+| `contactsEnabled`               | on      |       | May use contacts                             |
+| `dailyTotalEmails`              | 50      | 0–500 | Emails per UTC day, individual and bulk      |
+| `dailyBulkRecipients`           | 25      | 0–500 | Recipients of bulk sends per UTC day         |
+| `maxBulkRecipientsPerOperation` | 10      | 1–20  | Recipients in one bulk send                  |
+| `maxScheduledEmails`            | 20      | 0–100 | ACTIVE schedules, one-time and recurring     |
+| `maxRecurringSchedules`         | 5       | 0–20  | ACTIVE recurring schedules (within the 20)   |
+| `maxFutureSchedulingWindowDays` | 30      | 1–365 | How far ahead a schedule's first send may be |
 
 **These are the console's own safety limits, not Google's Gmail quotas.**
 Google applies its own per-account sending limits independently; the
@@ -633,10 +655,11 @@ and on the server, which always re-checks:
 
 ## Sending
 
-Sending is explicit and synchronous: the user presses Send on
+Sending from compose is explicit and synchronous: the user presses Send on
 `/admin/compose`, and the Server Action sends within that request. There is
-no queue, worker, scheduler, cron, timer, or poller, and no message is sent
-later.
+no queue, worker, cron, timer, or poller. A message is sent later only when
+the user schedules it on `/admin/schedules`; that send goes through the
+same flow below, run by the scheduler function (see "Scheduled sending").
 
 ### Message format
 
@@ -797,13 +820,271 @@ time-ordered operation ID), and only the user's own.
 Results and history show fixed messages per status and failure code;
 nothing from Google's responses is shown or stored.
 
-### Not built in M3
+## Scheduled sending
 
-Scheduling, recurring sends, campaigns, analytics, open or click tracking,
-unsubscribe handling, attachments, HTML mail, inbox access or sync, other
-providers (Outlook, Microsoft 365, GoDaddy, Titan), background workers,
-public sign-up, billing, multi-tenancy, multi-factor authentication, and
-password reset.
+A user can schedule the same message compose would send, once
+(`ONE_TIME`) or on a repeating timetable (`RECURRING`), from
+`/admin/schedules`. Creating a schedule sends nothing. At each due time
+EventBridge Scheduler invokes a short-lived Lambda function, which sends
+that one occurrence through M3's `sendEmail` with the schedule's owner as
+the actor. Nothing runs between occurrences: there is no worker, cron
+process, poller, queue, or always-running service. The decision is
+recorded in [ADR 0006](../adr/0006-eventbridge-scheduler-scheduled-sends.md).
+
+```
+/admin/schedules (Server Action; actor from the session)
+  → validate the form, the times, and the window
+  → the same checks a send would pass now (checkSendDraft)
+  → DynamoDB transaction: schedule + owner pointer + counts within limits
+  → EventBridge Scheduler: CreateSchedule (payload: schedule ID only)
+… at each due time …
+EventBridge Scheduler → (SchedulerInvokeRole) → scheduler Lambda
+  → payload is exactly {scheduleId, scheduledTime}
+  → schedule exists, ACTIVE, time is one of its occurrences, due now
+  → claim the occurrence (transaction: run item absent + schedule ACTIVE)
+  → sendEmail(owner, stored message, deterministic operation ID)
+  → record the run; advance or end the schedule
+```
+
+### Schedule model
+
+| Field                                                                       | Meaning                                                           |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `type`                                                                      | `ONE_TIME` or `RECURRING`                                         |
+| `status`                                                                    | `ACTIVE`, `CANCELLED`, `COMPLETED`, or `FAILED`                   |
+| `userId`, `createdBy`                                                       | The session's user; never from the form                           |
+| `senderIdentityId`, `contactIds`, `emails`, `templateId`, `subject`, `body` | The message, as compose would submit it                           |
+| `timeZone`, `startLocal`                                                    | IANA zone and the local start the user entered                    |
+| `startAt`, `endAt`, `nextRunAt`                                             | UTC instants (ISO 8601)                                           |
+| `recurrence`                                                                | `DAILY`, `WEEKLY` with weekdays, or `MONTHLY` with a day          |
+| `lastRunAt`, `lastRunStatus`, `lastRunFailure`, `runCount`                  | The latest occurrence's outcome                                   |
+| `triggerName`                                                               | The Scheduler schedule's name, `mail-<schedule ID>`               |
+| `failureCode`                                                               | Why the schedule failed without running (`scheduler-unavailable`) |
+
+`OVERDUE` is not stored: like an expired invitation, it is derived when
+read for an `ACTIVE` schedule whose next send is more than an hour past
+without having run (Scheduler did not invoke it). There is no `PAUSED`
+state; pausing would need trigger updates and resumption rules for little
+value at this scale. `COMPLETED` means the schedule ran out of
+occurrences; `FAILED` means a one-time schedule's occurrence did not send,
+or its trigger could not be created. A recurring schedule never becomes
+`FAILED` because one occurrence failed; it continues with the next one.
+
+When a schedule ends (cancelled, completed, or failed) its `body` is
+cleared and it expires from the table after 90 days, like send records.
+Subjects stay for the list. Message bodies are stored only while a
+schedule is `ACTIVE`, because the function must send them later.
+
+### Creation
+
+- The owner is the signed-in user. The form carries no user ID; a
+  `userId` or `createdBy` field is ignored.
+- The message fields are exactly compose's (the form reuses its fields),
+  and `checkSendDraft` applies every M3 check that does not depend on
+  today's quota: user ACTIVE, sending enabled, own APPROVED sender with a
+  usable Gmail connection, own contacts, bulk switch and per-send maximum,
+  own template, placeholders resolvable for every recipient, and a
+  buildable message. A schedule that could not send now is refused now.
+- The sender identity must be the user's own; its address is stored for
+  display only. The send always uses the identity's current address.
+- Daily quotas are not reserved at creation. They are reserved when each
+  occurrence sends, against that day's counters.
+
+### Time zones and recurrence
+
+The user enters a local date and time (`<input type="datetime-local">`)
+and picks an IANA zone; the browser's zone is preselected. The server
+validates the zone (`Area/Location` names known to the runtime, or `UTC`;
+abbreviations such as `IST` or `EST` are refused) and converts with the
+runtime's time zone database (`Intl`), never the server's own zone. Every
+stored instant is UTC.
+
+Recurrence is a small structured model, never cron text from the user:
+
+| Frequency | Choice                      | Scheduler expression (in the zone) |
+| --------- | --------------------------- | ---------------------------------- |
+| `DAILY`   | (none)                      | `cron(m h * * ? *)`                |
+| `WEEKLY`  | one or more weekdays        | `cron(m h ? * MON,WED *)`          |
+| `MONTHLY` | a day of the month, 1 to 28 | `cron(m h D * ? *)`                |
+
+The time of day is the start's local time. Days 29 to 31 are not offered,
+so every month has the day. An optional end stops a recurring schedule;
+without one it repeats until cancelled.
+
+Daylight saving time follows EventBridge Scheduler's rules, and the
+application computes the same occurrences: a local time that does not
+exist that day (spring forward) has no occurrence, and a local time that
+happens twice (fall back) is one occurrence. A one-time start that does
+not exist in its zone is refused. Occurrences are keyed by their local
+date and time, so both instants of a repeated time map to one claim.
+
+### Limits
+
+From the OWNER's settings for the user, enforced on the server:
+
+- `maxScheduledEmails` (default 20): ACTIVE schedules of both types.
+- `maxRecurringSchedules` (default 5): ACTIVE recurring schedules, which
+  also count towards the first limit.
+- `maxFutureSchedulingWindowDays` (default 30): a schedule's first send
+  must be within this many days. A recurrence may continue beyond it,
+  until its end or cancellation.
+- The first send must be at least 2 minutes ahead, so its trigger exists
+  before it is due.
+
+The counts live in one item per user (`SCHEDULE_COUNT` / user ID). Creating
+a schedule is one transaction: the counter update is conditional on staying
+within the limits (`active <= max - 1`, and the same for `recurring`), and
+the schedule and its owner pointer are written only if absent. Concurrent
+creations cannot both take the last slot. Ending a schedule decrements the
+counts in the same transaction that moves it out of `ACTIVE`, conditional
+on it being `ACTIVE`, so a slot is released exactly once. Lowering a limit
+below the current count keeps existing schedules and refuses new ones.
+
+### Execution
+
+EventBridge Scheduler holds one schedule per application schedule in the
+`<stack>-mail` group. One-time triggers use `at(<UTC time>)`; recurring
+ones use the cron expression above with the schedule's zone, a start a
+minute before the first send, and the optional end. All use
+`FlexibleTimeWindow: OFF` and delete themselves after their last
+invocation. The trigger's payload is
+`{"scheduleId": "<id>", "scheduledTime": "<aws.scheduler.scheduled-time>"}`
+and nothing else; it holds no recipient, sender, content, or user.
+
+The scheduler function (`lib/admin/scheduleHandler.ts`, bundled to
+`.aws-build/scheduler`) has no function URL and no resource-based policy.
+Only `SchedulerInvokeRole`, which only `scheduler.amazonaws.com` can assume
+for this account's schedules in the console's group, may invoke it. For
+each invocation it:
+
+1. Accepts the event only if it is exactly `scheduleId` (a UUID) and
+   `scheduledTime` (UTC). Any other field, including a recipient, body,
+   sender, or user, makes the event invalid and nothing happens.
+2. Loads the schedule from DynamoDB through its owner pointer. Missing:
+   it deletes the orphaned trigger. Not `ACTIVE`: it deletes the trigger.
+3. Checks that the time is one of the stored schedule's occurrences (the
+   one-time instant, or an occurrence of the recurrence between start and
+   end) and is due (at most a minute early). Past the end: the schedule is
+   completed and the trigger deleted.
+4. Claims the occurrence: one transaction creates the run item
+   (`SCHEDULE_RUN#<userId>` / `<scheduleId>#<local time>`) only if absent,
+   with a no-op write conditional on the schedule still being `ACTIVE`.
+5. If the invocation is more than an hour late, records the occurrence as
+   `missed` without sending.
+6. Calls M3's `sendEmail` with the owner (loaded from the table) as the
+   actor and the stored message, so every M3 gate applies again at send
+   time: user ACTIVE, sending enabled, own APPROVED identity, CONNECTED
+   Gmail with a working token (refreshed through M2), own contacts with
+   their current details, template still present and templates enabled,
+   bulk rules, placeholders, and today's quota, reserved atomically.
+7. Records the run's result on the run and the schedule, and either moves
+   the schedule to its next occurrence or ends it.
+
+### Idempotency
+
+Each occurrence is claimed once. The run item's key is the schedule ID and
+the occurrence's local date and time, created with "must not exist", so a
+repeated invocation (a Scheduler or Lambda retry, a duplicate delivery, or
+both instants of a repeated local time) finds it and does nothing,
+whatever its status: `SENT`, still in progress, `FAILED`, or `UNCERTAIN`.
+
+The occurrence's M3 operation ID is deterministic: the occurrence's
+millisecond timestamp, a dot, and the first 22 base64url characters of
+SHA-256 of `schedule:<id>:<local time>`. Its send records therefore have
+the same keys however often the occurrence is attempted, so M3's own
+per-recipient idempotency applies underneath. Send records made by a
+schedule carry its `scheduleId`, and compose's history marks them
+"Scheduled".
+
+### Failures and retries
+
+No send is retried automatically. An occurrence is final once claimed; a
+recurring schedule continues with its next occurrence.
+
+| Category      | Failure codes                                                                                                                                                                  | Result                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| AUTHORIZATION | `user-inactive`, `sending-disabled`, `sender-unavailable`, `not-connected`, `reauth-required`, `gmail-auth-failed`, `contacts-disabled`, `templates-disabled`, `bulk-disabled` | Not sent                             |
+| VALIDATION    | `template-not-found`, `recipient-not-found`, `invalid-recipient`, `no-recipients`, `unresolved-placeholder`, `invalid-message`, `missed`                                       | Not sent                             |
+| LIMIT         | `bulk-limit-exceeded`, `daily-limit-reached`, `daily-bulk-limit-reached`                                                                                                       | Not sent                             |
+| REJECTED      | `gmail-rejected`                                                                                                                                                               | Not sent (Gmail refused it)          |
+| TRANSIENT     | `gmail-unavailable` (before sending), `gmail-rate-limited`, `busy`, `not-attempted`                                                                                            | Not sent; not retried                |
+| UNCERTAIN     | `gmail-unavailable` (during sending), `interrupted`                                                                                                                            | May have been sent; **never resent** |
+
+`interrupted` is an unexpected error while sending: the run is recorded
+`UNCERTAIN` and whatever M3 reserved stays reserved. The only retries are
+infrastructure retries of the invocation itself, before an occurrence is
+claimed: Scheduler retries a failed invocation up to 2 times within an
+hour, and Lambda retries a failed asynchronous invocation once, dropping
+events older than an hour. Both are harmless because of the claim.
+
+### Recurrence advancement
+
+After an occurrence, the next one is computed from the recurrence in the
+schedule's zone, as the first occurrence after both the intended time and
+now. It is never "now plus an interval", so a late run does not shift the
+timeline, and occurrences that were never invoked are not backfilled. A
+next occurrence past the end, or none at all, completes the schedule and
+deletes its trigger.
+
+### Cancellation
+
+The owner cancels from the list; no one else can, including the OWNER.
+Cancelling moves the schedule to `CANCELLED` (conditional on `ACTIVE`,
+releasing its slot in the same transaction), then deletes its trigger.
+
+- Cancellation before an occurrence is claimed stops it: the claim
+  requires the schedule to be `ACTIVE`.
+- An occurrence already claimed keeps running. Its result is still
+  recorded, but it cannot move the schedule back to `ACTIVE` or set a next
+  send. A message Gmail has accepted cannot be recalled.
+- If the trigger cannot be deleted at that moment, the schedule is still
+  cancelled. The next time the trigger fires, the function finds the
+  schedule not `ACTIVE`, sends nothing, and deletes the trigger, so no
+  trigger is left behind for good.
+
+### Editing
+
+Schedules cannot be edited. Changing a schedule safely would mean updating
+the stored message, the counts, and the trigger together while an
+occurrence may be running; cancelling and creating a new schedule gives the
+same result with the existing, tested paths. The list says so.
+
+### Templates, contacts, and senders after scheduling
+
+A schedule stores the subject and body as entered (a snapshot; editing the
+template later does not change it) and the chosen template's ID, so M3's
+template checks apply at each occurrence: if the template is deleted, or
+the OWNER turns templates off, later occurrences fail as
+`template-not-found` or `templates-disabled`. Contacts are stored by ID and
+read at each occurrence, so placeholders use the contact's current name,
+email, and company, and a deleted contact fails the occurrence
+(`recipient-not-found`). A disabled identity, a disconnected or
+reauthorization-required Gmail connection, a disabled user, or sending
+turned off likewise stops each later occurrence until fixed.
+
+### Configuration
+
+| Name                   | Function | Source in production                   |
+| ---------------------- | -------- | -------------------------------------- |
+| `SCHEDULER_GROUP_NAME` | both     | Template: the `ScheduleGroup` name     |
+| `SCHEDULER_TARGET_ARN` | server   | Template: the scheduler function's ARN |
+| `SCHEDULER_ROLE_ARN`   | server   | Template: `SchedulerInvokeRole`'s ARN  |
+
+The scheduler function also receives `ADMIN_TABLE_NAME`, the Google client
+settings, and `GMAIL_TOKEN_KMS_KEY_ID`, and runs only when all are set; it
+never falls back to an in-memory store or local key. Without the three
+`SCHEDULER_*` values the server reports "Scheduling is not configured" in
+production. In local development schedules are kept by an in-process
+stand-in that never fires (with a warning), so the pages can be used but
+nothing is sent later.
+
+### Not built
+
+Campaigns, analytics, open or click tracking, unsubscribe handling,
+attachments, HTML mail, inbox access or sync, other providers (Outlook,
+Microsoft 365, GoDaddy, Titan), editing or pausing schedules, automatic
+retries, public sign-up, billing, multi-tenancy, multi-factor
+authentication, and password reset.
 
 ## Logging
 
@@ -816,7 +1097,10 @@ carry a fixed message (`Google OAuth request failed (<kind>).`) and never a
 response body. Sending logs nothing on success or on a Gmail refusal (the
 outcome is in the send record); an unexpected error logs only
 `[admin] Send failed (<error name>).` Message bodies, subjects,
-recipients, and Gmail responses are never logged.
+recipients, and Gmail responses are never logged. The scheduler function
+logs one fixed line per invocation, `[scheduler] Occurrence <outcome>.`,
+with the failure category and code when it did not send; never an
+address, subject, body, user, or token.
 
 ## Known limitations
 
@@ -861,3 +1145,14 @@ recipients, and Gmail responses are never logged.
   larger lists need several sends.
 - **Plain text only.** No HTML, attachments, display names, or `Reply-To`.
 - **A user's daily counters reset at 00:00 UTC**, not local midnight.
+- **Scheduled sends are not retried.** A failed or missed occurrence is
+  recorded; a one-time schedule then ends `FAILED`, and a recurring one
+  waits for its next occurrence.
+- **No editing or pausing of schedules.** Cancel and create a new one.
+- **Late invocations are dropped.** If Scheduler invokes an occurrence
+  more than an hour late, it is recorded as missed and not sent.
+- **Message bodies of ACTIVE schedules are stored** in the table until the
+  schedule ends, because the function must send them later.
+- **Monthly schedules run on day 1 to 28** only.
+- **Local development never fires schedules.** The in-process stand-in
+  only records them.

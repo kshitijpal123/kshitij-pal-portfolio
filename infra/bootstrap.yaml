@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Portfolio deployment prerequisites, created once by an administrator: GitHub
   Actions OIDC trust, the GitHub deploy role, the CloudFormation execution
-  role, the Lambda permissions boundary, and the Lambda artifacts bucket.
+  role, the Lambda (and Scheduler invoke) permissions boundary, and the Lambda
+  artifacts bucket.
   See docs/architecture/deployment.md.
 
 Parameters:
@@ -106,6 +107,23 @@ Resources:
             Condition:
               StringEquals:
                 kms:EncryptionContext:purpose: gmail-oauth-refresh-token
+          # Scheduled sends: the server manages the triggers in the stack's
+          # schedule groups, and Scheduler's role invokes only the stack's
+          # functions. Each role's own policy names the exact resources.
+          - Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+              - scheduler:DeleteSchedule
+            Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${AppStackName}-*/*"
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${AppStackName}-*"
+            Condition:
+              StringEquals:
+                iam:PassedToService: scheduler.amazonaws.com
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AppStackName}-*"
 
   # Assumed by CloudFormation to create and update the application stack.
   CloudFormationExecutionRole:
@@ -136,6 +154,9 @@ Resources:
                   - lambda:CreateFunctionUrlConfig
                   - lambda:UpdateFunctionUrlConfig
                   - lambda:DeleteFunctionUrlConfig
+                  - lambda:PutFunctionEventInvokeConfig
+                  - lambda:UpdateFunctionEventInvokeConfig
+                  - lambda:DeleteFunctionEventInvokeConfig
                   - lambda:TagResource
                   - lambda:UntagResource
                   - lambda:Get*
@@ -179,6 +200,18 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PassedToService: lambda.amazonaws.com
+              # The group only; its schedules are created at run time by the
+              # server, never by CloudFormation.
+              - Sid: ScheduleGroup
+                Effect: Allow
+                Action:
+                  - scheduler:CreateScheduleGroup
+                  - scheduler:DeleteScheduleGroup
+                  - scheduler:GetScheduleGroup
+                  - scheduler:TagResource
+                  - scheduler:UntagResource
+                  - scheduler:ListTagsForResource
+                Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${AppStackName}-*"
               - Sid: LogGroup
                 Effect: Allow
                 Action:

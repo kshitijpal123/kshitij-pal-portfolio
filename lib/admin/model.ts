@@ -249,6 +249,12 @@ export type UserSettings = {
   /** Recipients of bulk sends per UTC day. */
   dailyBulkRecipients: number;
   maxBulkRecipientsPerOperation: number;
+  /** ACTIVE schedules of either type at once. */
+  maxScheduledEmails: number;
+  /** ACTIVE recurring schedules at once (also counted above). */
+  maxRecurringSchedules: number;
+  /** How far ahead a schedule's first send may be, in days. */
+  maxFutureSchedulingWindowDays: number;
   updatedAt: string | null;
   updatedBy: string | null;
 };
@@ -319,9 +325,150 @@ export type SendRecord = {
   attempts: number;
   gmailMessageId: string | null;
   failureCode: SendFailureCode | null;
+  /** Set when a schedule's occurrence made this send. */
+  scheduleId?: string;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
 };
 
 export type DailyUsage = { total: number; bulk: number };
+
+export type ScheduleType = "ONE_TIME" | "RECURRING";
+
+/**
+ * ACTIVE: a Scheduler trigger exists and occurrences will run. The others
+ * are final: CANCELLED by the user, COMPLETED once a one-time send went out
+ * or a recurrence reached its end, FAILED when a one-time send did not go
+ * out or the trigger could not be created.
+ */
+export type ScheduleStatus = "ACTIVE" | "CANCELLED" | "COMPLETED" | "FAILED";
+
+export const weekdays = [
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+  "SUNDAY",
+] as const;
+
+export type Weekday = (typeof weekdays)[number];
+
+/** Days 29–31 are excluded so every month has the day. */
+export const maxDayOfMonth = 28;
+
+/**
+ * A recurrence is structured data, never cron text from the user. Every
+ * occurrence is at the schedule's local `time` in its time zone, every day,
+ * every chosen weekday, or every month on one day.
+ */
+export type RecurrenceRule =
+  | { frequency: "DAILY" }
+  | { frequency: "WEEKLY"; weekdays: Weekday[] }
+  | { frequency: "MONTHLY"; dayOfMonth: number };
+
+/** `time` is the local `HH:mm` of every occurrence. */
+export type Recurrence = RecurrenceRule & { time: string };
+
+/** Why an occurrence (or the schedule itself) did not send. */
+export type ScheduleFailureCode =
+  | "user-inactive"
+  | "sending-disabled"
+  | "sender-unavailable"
+  | "not-connected"
+  | "reauth-required"
+  | "contacts-disabled"
+  | "templates-disabled"
+  | "template-not-found"
+  | "no-recipients"
+  | "recipient-not-found"
+  | "invalid-recipient"
+  | "bulk-disabled"
+  | "bulk-limit-exceeded"
+  | "daily-limit-reached"
+  | "daily-bulk-limit-reached"
+  | "unresolved-placeholder"
+  | "invalid-message"
+  | "gmail-unavailable"
+  | "busy"
+  | SendFailureCode
+  | "missed"
+  | "interrupted"
+  | "scheduler-unavailable";
+
+/**
+ * A user's scheduled message. The subject and body are captured when the
+ * schedule is created (later template edits do not change it); contacts are
+ * kept by ID and personalized from their current details at each
+ * occurrence. The sender is the identity's ID, re-checked at every send.
+ */
+export type Schedule = {
+  id: string;
+  userId: string;
+  type: ScheduleType;
+  status: ScheduleStatus;
+  senderIdentityId: string;
+  /** The identity's address when created, for display only. */
+  senderEmail: string;
+  contactIds: string[];
+  emails: string[];
+  templateId: string | null;
+  subject: string;
+  /** Emptied once the schedule is final, so it is kept only while needed. */
+  body: string;
+  /** IANA identifier, for example `Asia/Kolkata`. */
+  timeZone: string;
+  /** The start as entered, `YYYY-MM-DDTHH:mm` in `timeZone`. */
+  startLocal: string;
+  /** UTC instant of `startLocal`. */
+  startAt: string;
+  /** UTC; no occurrence runs after it. Recurring only. */
+  endAt: string | null;
+  recurrence: Recurrence | null;
+  /** UTC instant of the next occurrence; `null` once final. */
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: ScheduleRunStatus | null;
+  lastRunFailure: ScheduleFailureCode | null;
+  runCount: number;
+  /** The EventBridge Scheduler schedule's name within the group. */
+  triggerName: string;
+  /** Why the schedule became FAILED without an occurrence. */
+  failureCode: ScheduleFailureCode | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt: string | null;
+  completedAt: string | null;
+};
+
+/**
+ * One occurrence of a schedule, keyed by the schedule and the occurrence's
+ * local date and time, so a repeated invocation finds it instead of sending
+ * again. RESERVED: claimed, outcome not recorded. SENT: every recipient was
+ * sent. FAILED: nothing (or not everything) was sent, definitely.
+ * UNCERTAIN: Gmail may have accepted a message; never retried.
+ */
+export type ScheduleRunStatus = "RESERVED" | "SENT" | "FAILED" | "UNCERTAIN";
+
+export type ScheduleRun = {
+  scheduleId: string;
+  userId: string;
+  /** Local `YYYY-MM-DDTHH:mm` of the occurrence in the schedule's zone. */
+  occurrence: string;
+  /** UTC instant EventBridge Scheduler intended. */
+  scheduledFor: string;
+  /** The M3 send operation ID derived from the schedule and occurrence. */
+  operationId: string;
+  status: ScheduleRunStatus;
+  failureCode: ScheduleFailureCode | null;
+  sent: number;
+  failed: number;
+  uncertain: number;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type ScheduleCounts = { active: number; recurring: number };

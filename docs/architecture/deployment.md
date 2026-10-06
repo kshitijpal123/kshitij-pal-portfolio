@@ -31,22 +31,38 @@ Why this architecture: [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
                                └──────────────────────────────────────┘
 ```
 
-| Service         | Resource                                      | Purpose                                                       |
-| --------------- | --------------------------------------------- | ------------------------------------------------------------- |
-| CloudFront      | Distribution, cache and header policies       | Public HTTPS endpoint, edge cache, routing by path            |
-| Lambda          | `portfolio-production-server`, function URL   | Runs the Next.js standalone server                            |
-| S3              | `portfolio-production-assets-<acct>-<rgn>`    | `/_next/static/*` (hashed, immutable)                         |
-| S3              | `portfolio-production-artifacts-<acct>-…`     | Lambda code packages uploaded by `aws cloudformation package` |
-| CloudWatch Logs | `/aws/lambda/portfolio-production-server`     | Server logs, 30-day retention                                 |
-| DynamoDB        | `portfolio-production-admin`                  | Private mail console data (see `mail-console.md`)             |
-| KMS             | `GmailTokenKey` (customer managed key)        | Envelope encryption of stored Gmail refresh tokens            |
-| IAM             | Roles and a permissions boundary              | OIDC deploy role, CloudFormation role, Lambda role            |
-| CloudFormation  | `portfolio-bootstrap`, `portfolio-production` | Everything above, as code                                     |
+| Service         | Resource                                      | Purpose                                                                    |
+| --------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
+| CloudFront      | Distribution, cache and header policies       | Public HTTPS endpoint, edge cache, routing by path                         |
+| Lambda          | `portfolio-production-server`, function URL   | Runs the Next.js standalone server                                         |
+| S3              | `portfolio-production-assets-<acct>-<rgn>`    | `/_next/static/*` (hashed, immutable)                                      |
+| S3              | `portfolio-production-artifacts-<acct>-…`     | Lambda code packages uploaded by `aws cloudformation package`              |
+| CloudWatch Logs | `/aws/lambda/portfolio-production-server`     | Server logs, 30-day retention                                              |
+| DynamoDB        | `portfolio-production-admin`                  | Private mail console data (see `mail-console.md`)                          |
+| KMS             | `GmailTokenKey` (customer managed key)        | Envelope encryption of stored Gmail refresh tokens                         |
+| Lambda          | `portfolio-production-scheduler`              | Sends one due occurrence of a scheduled send; no URL                       |
+| CloudWatch Logs | `/aws/lambda/portfolio-production-scheduler`  | Scheduler function logs, 30-day retention                                  |
+| Scheduler       | Schedule group `portfolio-production-mail`    | One EventBridge Scheduler trigger per scheduled send                       |
+| IAM             | Roles and a permissions boundary              | OIDC deploy role, CloudFormation role, Lambda roles, Scheduler invoke role |
+| CloudFormation  | `portfolio-bootstrap`, `portfolio-production` | Everything above, as code                                                  |
 
 Outside the templates, managed by hand: the Route 53 hosted zone for
 `kshitijpal.in`, the ACM certificate, and the distribution's alias (see
 "Custom domain"). Nothing else: no API Gateway, load balancer, container,
-relational database, queue, or WAF.
+relational database, queue, worker, or WAF.
+
+Scheduled sends (see "Scheduled sending" in `mail-console.md`) add
+EventBridge Scheduler and a second, short-lived function. The server
+creates and deletes triggers in the `portfolio-production-mail` group at
+run time; when one is due, Scheduler assumes `SchedulerInvokeRole` and
+invokes `portfolio-production-scheduler` asynchronously with only the
+schedule's ID and time. The function reads everything else from the
+console table and sends through Gmail as the server would. Nothing runs
+between occurrences, and CloudFormation never creates individual
+triggers. The scheduler function is bundled separately by
+`node infra/package-scheduler.mts` (esbuild) into
+`.aws-build/scheduler/index.mjs`, about 0.7 MB; it does not contain the
+site.
 
 The console table (`AdminTable`) is on-demand, with point-in-time recovery
 and deletion protection, and `DeletionPolicy: Retain`, so neither a stack
@@ -158,6 +174,7 @@ Revisit it when analytics or monitoring adds third-party scripts.
 | `GOOGLE_CLIENT_SECRET`                                                       | Runtime, **secret** | GitHub environment secret                           | Lambda environment → Gmail connection  |
 | `GOOGLE_OAUTH_REDIRECT_URI`                                                  | Runtime             | Set by the template from `SITE_URL`                 | Lambda environment → Gmail connection  |
 | `GMAIL_TOKEN_KMS_KEY_ID`                                                     | Runtime             | Set by the template (the `GmailTokenKey` ARN)       | Lambda environment → Gmail connection  |
+| `SCHEDULER_GROUP_NAME`, `SCHEDULER_TARGET_ARN`, `SCHEDULER_ROLE_ARN`         | Runtime             | Set by the template                                 | Lambda environment → scheduled sends   |
 | `AWS_REGION`                                                                 | Deployment          | GitHub environment variable                         | Workflow                               |
 | `AWS_DEPLOY_ROLE_ARN`, `AWS_CLOUDFORMATION_ROLE_ARN`, `AWS_ARTIFACTS_BUCKET` | Deployment          | GitHub environment variables                        | Workflow                               |
 
@@ -206,14 +223,36 @@ Revisit it when analytics or monitoring adds third-party scripts.
   encrypt or decrypt actions. The key has automatic yearly rotation and
   `DeletionPolicy: Retain`, since deleting it would make every stored token
   unreadable.
+- **Scheduled sends.** A separate policy on the server role
+  (`ServerFunctionSchedulePolicy`) allows only `scheduler:CreateSchedule`
+  and `scheduler:DeleteSchedule` on schedules in the
+  `portfolio-production-mail` group, and `iam:PassRole` on
+  `SchedulerInvokeRole` only when passed to `scheduler.amazonaws.com`.
+  `SchedulerInvokeRole` trusts only `scheduler.amazonaws.com`, for this
+  account (`aws:SourceAccount`) and schedules in that group
+  (`aws:SourceArn`), and may only `lambda:InvokeFunction` the scheduler
+  function. The scheduler function's own role may write its log group,
+  perform `GetItem`, `PutItem`, `UpdateItem`, and `Query` on the console
+  table (no `DeleteItem`, `Scan`, or batch), and `scheduler:DeleteSchedule`
+  in the group (to remove triggers that must not fire again); it cannot
+  create triggers. The `GmailTokenKey` policy grants it the same two KMS
+  actions under the same `purpose` condition as the server. The scheduler
+  function has no function URL and no resource-based policy. No `*`
+  actions are granted (`events:*`, `scheduler:*`, `lambda:*`, and
+  `dynamodb:*` appear nowhere). Both function roles and the invoke role
+  carry the permissions boundary, which allows these Scheduler, PassRole
+  (to Scheduler only), and invoke actions only on the stack's own
+  `portfolio-production-*` resources.
 - **CloudFormation execution role** (`cfn-exec-portfolio-production`). It
   manages only the application stack's resources: functions, roles, and log
   groups named `portfolio-production-*`, tables named
   `portfolio-production-*` (create, update, delete, TTL, backups, tags), and
   the assets bucket, plus creating and administering KMS keys in the
   account (key policy, rotation, tags, scheduled deletion; never encrypt or
-  decrypt). It can create
-  roles only with the boundary attached, and pass them only to Lambda.
+  decrypt), the `portfolio-production-*` schedule group (never individual
+  schedules), and the functions' asynchronous invoke configuration. It can
+  create roles only with the boundary attached, and pass them only to
+  Lambda.
   CloudFront policy actions use `*` where CloudFront has no resource-level
   permissions.
 - **GitHub deploy role** (`github-deploy-portfolio-production`). It may
@@ -287,13 +326,13 @@ production`. The deploy job fails before building if `SITE_URL` is unset
 `.github/workflows/ci.yml` has two jobs:
 
 1. **`verify`** runs on every push and pull request: `format:check`, `lint`,
-   `typecheck`, `test`, and `build`.
+   `typecheck`, `test`, `build`, and the scheduler function bundle.
 2. **`deploy`** runs only for pushes to `main`, after `verify` succeeds, in
    the `production` environment. Its steps:
 
 ```
 check variables → npm ci → next build (SITE_URL) → assemble Lambda package
-  → assume role (OIDC) → sync /_next/static to S3 (if the stack exists)
+  → bundle scheduler function → assume role (OIDC) → sync /_next/static to S3 (if the stack exists)
   → cloudformation package → cloudformation deploy (CloudFormation role)
   → sync /_next/static → invalidate /* and wait → smoke test
 ```
@@ -382,6 +421,21 @@ Deploying before step 2 is safe: the client values are empty, and the
 dashboard reports Gmail connection as not configured. The `Distribution`
 resource is unchanged.
 
+### First deploy of scheduled sends
+
+Scheduled sends add a schedule group, a second function with its invoke
+configuration, a Scheduler invoke role, and new permissions in both
+templates. **Update the bootstrap stack first** (the same
+`aws cloudformation deploy` command as above): without it, the
+CloudFormation role cannot create the schedule group or the invoke
+configuration, and the boundary would deny the server's Scheduler calls
+and the invocation. Then push. No new variables or secrets are needed; the
+template wires the three `SCHEDULER_*` values. The `Distribution` resource
+is unchanged.
+
+Removing the feature later: deleting the schedule group (with the stack
+resource) also deletes every trigger in it.
+
 ### Rotating the Google client secret
 
 Create a new secret on the OAuth client in Google Cloud, update the
@@ -452,16 +506,18 @@ the same pipeline, is the release record.
 
 ## Troubleshooting
 
-| Symptom                                                   | Likely cause and fix                                                                                                                |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| "Variable … is not set on the production environment"     | Step 3 of the setup is incomplete                                                                                                   |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The owner, repository, IDs, or environment name differ from the bootstrap parameters; update the bootstrap stack                    |
-| CloudFormation `AccessDenied` for some action             | The CloudFormation role lacks it. Add the narrowest action to `infra/bootstrap.yaml` and redeploy the bootstrap stack               |
-| CloudFront 502 or 503                                     | The server did not start. Read `/aws/lambda/portfolio-production-server` (a missing exec bit on `run.sh` or a crash in `server.js`) |
-| `{"Message":"Forbidden"}` from the function URL           | A function URL permission is missing; both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` are required                      |
-| Contact form shows the generic error                      | The log says `[contact] Email delivery is not configured.` (variables unset) or gives a Resend error code (key or sender domain)    |
-| Old content after a deploy                                | Check that the invalidation step ran; `aws cloudfront create-invalidation --paths "/*"` fixes it by hand                            |
-| JS or CSS 403 from `/_next/static`                        | The asset was not uploaded (403 rather than 404 because CloudFront cannot list the bucket). Re-run the workflow                     |
+| Symptom                                                   | Likely cause and fix                                                                                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Variable … is not set on the production environment"     | Step 3 of the setup is incomplete                                                                                                                         |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The owner, repository, IDs, or environment name differ from the bootstrap parameters; update the bootstrap stack                                          |
+| CloudFormation `AccessDenied` for some action             | The CloudFormation role lacks it. Add the narrowest action to `infra/bootstrap.yaml` and redeploy the bootstrap stack                                     |
+| CloudFront 502 or 503                                     | The server did not start. Read `/aws/lambda/portfolio-production-server` (a missing exec bit on `run.sh` or a crash in `server.js`)                       |
+| `{"Message":"Forbidden"}` from the function URL           | A function URL permission is missing; both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` are required                                            |
+| Contact form shows the generic error                      | The log says `[contact] Email delivery is not configured.` (variables unset) or gives a Resend error code (key or sender domain)                          |
+| Old content after a deploy                                | Check that the invalidation step ran; `aws cloudfront create-invalidation --paths "/*"` fixes it by hand                                                  |
+| "Scheduling is not configured" on `/admin/schedules`      | The server lacks a `SCHEDULER_*` variable; check the stack deployed with the scheduled-send resources                                                     |
+| A schedule shows OVERDUE                                  | Scheduler did not invoke it in time. Read `/aws/lambda/portfolio-production-scheduler`; an `AccessDenied` means the bootstrap stack is older than the app |
+| JS or CSS 403 from `/_next/static`                        | The asset was not uploaded (403 rather than 404 because CloudFront cannot list the bucket). Re-run the workflow                                           |
 
 ## Cost (high level)
 
@@ -476,7 +532,10 @@ provisioned capacity, so at five users its requests, storage, and
 point-in-time recovery are negligible. The Gmail token key is the one
 fixed monthly charge (a customer managed KMS key is billed per month, plus
 per request beyond the free tier; requests happen only on connect, refresh,
-and disconnect). Check current AWS pricing for figures.
+and disconnect). EventBridge Scheduler is billed per invocation (with a
+monthly free allowance) and the scheduler function runs only at due
+times, so scheduled sends at this scale add little. Check current AWS
+pricing for figures.
 A budget alarm is worth adding in the AWS Billing console. It is not in
 the templates.
 

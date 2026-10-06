@@ -26,6 +26,7 @@ describe("server and client boundaries", () => {
       "components/admin/GmailConnectButton.tsx",
       "components/admin/InviteForm.tsx",
       "components/admin/LoginForm.tsx",
+      "components/admin/ScheduleForm.tsx",
       "components/admin/SenderRequestForm.tsx",
       "components/admin/SetupForm.tsx",
       "components/admin/TemplateForm.tsx",
@@ -59,7 +60,7 @@ describe("private console rendering", () => {
     const pages = sourceFiles("app/admin").filter((file) =>
       file.endsWith("/page.tsx"),
     );
-    expect(pages).toHaveLength(10);
+    expect(pages).toHaveLength(11);
     for (const file of pages) {
       expect(readFileSync(file, "utf8"), file).toMatch(
         /from "@\/lib\/admin\/session"/,

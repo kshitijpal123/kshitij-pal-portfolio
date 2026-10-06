@@ -4,6 +4,7 @@ import AdminLayout, { metadata as layoutMetadata } from "@/app/admin/layout";
 import ApprovalsPage from "@/app/admin/approvals/page";
 import ComposePage from "@/app/admin/compose/page";
 import ContactsPage from "@/app/admin/contacts/page";
+import SchedulesPage from "@/app/admin/schedules/page";
 import InvitationPage from "@/app/admin/invite/[token]/page";
 import LoginPage from "@/app/admin/login/page";
 import DashboardPage from "@/app/admin/page";
@@ -14,7 +15,8 @@ import UsersPage from "@/app/admin/users/page";
 import { createContact } from "@/lib/admin/contacts";
 import { createInvitation } from "@/lib/admin/invitations";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
-import type { GmailConnection } from "@/lib/admin/model";
+import type { GmailConnection, Schedule } from "@/lib/admin/model";
+import { isValidTimeZone } from "@/lib/admin/recurrence";
 import { requestSenderIdentity } from "@/lib/admin/senderIdentities";
 import { defaultUserSettings, updateUserSettings } from "@/lib/admin/settings";
 import type { AdminStore } from "@/lib/admin/store";
@@ -31,6 +33,7 @@ const next = await vi.hoisted(async () => {
   return {
     mocks: createNextRequestMocks(),
     store: undefined as AdminStore | undefined,
+    schedulerConfigured: true,
   };
 });
 
@@ -41,6 +44,15 @@ vi.mock("next/server", () => next.mocks.server);
 vi.mock("@/lib/admin/getAdminStore", () => ({
   getAdminStore: () => next.store,
 }));
+vi.mock("@/lib/admin/scheduler", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/lib/admin/scheduler")>();
+  const { triggers } = original.createMemoryScheduleTriggers();
+  return {
+    ...original,
+    getScheduleTriggers: () => (next.schedulerConfigured ? triggers : null),
+  };
+});
 
 function signIn(token: string) {
   next.mocks.jar.set("admin_session", { value: token });
@@ -68,6 +80,7 @@ function tokenParams(token: string) {
 
 beforeEach(() => {
   next.mocks.jar.clear();
+  next.schedulerConfigured = true;
 });
 
 afterEach(() => {
@@ -651,6 +664,159 @@ describe("mail pages", () => {
       screen.getByText("Sending is turned off for your account by the owner."),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
+  });
+
+  function storedSchedule(
+    userId: string,
+    overrides: Partial<Schedule> = {},
+  ): Schedule {
+    const id = overrides.id ?? crypto.randomUUID();
+    return {
+      id,
+      userId,
+      type: "ONE_TIME",
+      status: "ACTIVE",
+      senderIdentityId: "identity",
+      senderEmail: "sender@gmail.com",
+      contactIds: [],
+      emails: ["rahul@example.com"],
+      templateId: null,
+      subject: "Scheduled hello",
+      body: "Private schedule body",
+      timeZone: "Asia/Kolkata",
+      startLocal: "2026-10-12T10:00",
+      startAt: "2026-10-12T04:30:00.000Z",
+      endAt: null,
+      recurrence: null,
+      nextRunAt: "2026-10-12T04:30:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastRunFailure: null,
+      runCount: 0,
+      triggerName: `mail-${id}`,
+      failureCode: null,
+      createdBy: userId,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      cancelledAt: null,
+      completedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("requires a session for schedules", async () => {
+    await mailSetup();
+    expect(await navigation(SchedulesPage())).toBe("/admin/login");
+  });
+
+  it("lists only the signed-in user's schedules, with cancel only while ACTIVE", async () => {
+    const { store, alice, bob } = await mailSetup();
+    await store.createSchedule(
+      storedSchedule(alice.user.id, { subject: "Alice once" }),
+      defaultUserSettings,
+    );
+    await store.createSchedule(
+      storedSchedule(alice.user.id, {
+        subject: "Alice weekly",
+        type: "RECURRING",
+        recurrence: {
+          frequency: "WEEKLY",
+          weekdays: ["MONDAY"],
+          time: "10:00",
+        },
+      }),
+      defaultUserSettings,
+    );
+    const done = storedSchedule(alice.user.id, { subject: "Alice done" });
+    await store.createSchedule(done, defaultUserSettings);
+    await store.endSchedule(done, {
+      status: "CANCELLED",
+      at: now.toISOString(),
+      failureCode: null,
+    });
+    await store.createSchedule(
+      storedSchedule(bob.user.id, { subject: "Bob secret" }),
+      defaultUserSettings,
+    );
+    signIn(alice.token);
+    render(await SchedulesPage());
+
+    expect(screen.getAllByText("Alice once").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Weekly on Monday at 10:00 (Asia/Kolkata)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Bob secret")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /Cancel schedule/ }),
+    ).toHaveLength(2);
+    expect(screen.getByText("2 / 20")).toBeInTheDocument();
+    expect(screen.getByText("1 / 5")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("Private schedule body");
+    expect(document.body.innerHTML).not.toContain(bob.user.id);
+  });
+
+  it("offers the schedule form with the user's own senders and a time zone", async () => {
+    const { store, owner, alice, bob } = await mailSetup();
+    const cipher = createLocalTokenCipher();
+    await seedConnectedSender(
+      store,
+      cipher,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    await seedConnectedSender(store, cipher, owner, bob.user, "bob@gmail.com");
+    signIn(alice.token);
+    render(await SchedulesPage());
+
+    expect(
+      within(screen.getByLabelText("From"))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["alice@gmail.com"]);
+    const zone = screen.getByLabelText("Time zone");
+    expect(isValidTimeZone((zone as HTMLSelectElement).value)).toBe(true);
+    expect(
+      within(zone).getByRole("option", { name: "UTC" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Send at")).toHaveAttribute(
+      "type",
+      "datetime-local",
+    );
+    expect(
+      screen.getByRole("button", { name: "Schedule" }),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when scheduling is unavailable or the limit is reached", async () => {
+    const { store, owner, alice } = await mailSetup();
+    await seedConnectedSender(
+      store,
+      createLocalTokenCipher(),
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    next.schedulerConfigured = false;
+    signIn(alice.token);
+    render(await SchedulesPage());
+    expect(
+      screen.getByText("Scheduling is not configured on this server."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Send at")).not.toBeInTheDocument();
+
+    next.schedulerConfigured = true;
+    await updateUserSettings(
+      store,
+      owner,
+      alice.user.id,
+      { ...defaultUserSettings, maxScheduledEmails: 0 },
+      now,
+    );
+    render(await SchedulesPage());
+    expect(
+      screen.getByText(/You have reached your limit of active schedules/),
+    ).toBeInTheDocument();
   });
 
   it("gives the OWNER sending settings for each user", async () => {

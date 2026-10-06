@@ -6,6 +6,7 @@ import type { GmailClient } from "@/lib/admin/gmailApi";
 import { completeGmailConnection } from "@/lib/admin/gmailConnections";
 import type { GoogleOAuthClient } from "@/lib/admin/googleOAuth";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
+import type { ScheduleTriggers } from "@/lib/admin/scheduler";
 import { newOperationId } from "@/lib/admin/sending";
 import type { AdminStore } from "@/lib/admin/store";
 import {
@@ -29,6 +30,7 @@ import {
 } from "@/tests/helpers/admin";
 import { createFakeGmail, seedConnectedSender } from "@/tests/helpers/mail";
 import { NavigationSignal } from "@/tests/helpers/nextRequest";
+import { createScheduleTriggers } from "@/tests/helpers/schedule";
 
 const next = await vi.hoisted(async () => {
   const { createNextRequestMocks } =
@@ -39,6 +41,7 @@ const next = await vi.hoisted(async () => {
     google: null as GoogleOAuthClient | null,
     cipher: null as TokenCipher | null,
     gmail: null as GmailClient | null,
+    triggers: null as ScheduleTriggers | null,
   };
 });
 
@@ -60,6 +63,10 @@ vi.mock("@/lib/admin/tokenCipher", async (importOriginal) => ({
 vi.mock("@/lib/admin/gmailApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/admin/gmailApi")>()),
   getGmailClient: () => next.gmail,
+}));
+vi.mock("@/lib/admin/scheduler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/admin/scheduler")>()),
+  getScheduleTriggers: () => next.triggers,
 }));
 
 function jar() {
@@ -92,6 +99,7 @@ beforeEach(() => {
   next.google = null;
   next.cipher = null;
   next.gmail = null;
+  next.triggers = null;
   logs = [];
   for (const method of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
@@ -822,6 +830,9 @@ describe("mail actions", () => {
       dailyTotalEmails: "500",
       dailyBulkRecipients: "500",
       maxBulkRecipientsPerOperation: "20",
+      maxScheduledEmails: "20",
+      maxRecurringSchedules: "5",
+      maxFutureSchedulingWindowDays: "30",
     });
 
     signIn(context.alice.token);
@@ -886,6 +897,156 @@ describe("mail actions", () => {
     expect(output).not.toContain(body);
     expect(output).not.toMatch(/ciphertext|encryptedDataKey/);
     expect(logs).toEqual(["[admin] Send failed (Error)."]);
+  });
+});
+
+describe("schedule actions", () => {
+  async function scheduleActionSetup() {
+    const { store, owner, ownerToken } = await seedOwner();
+    const alice = await seedUser(store, owner, "alice@example.com");
+    const bob = await seedUser(store, owner, "bob@example.com");
+    const cipher = createLocalTokenCipher();
+    const { identity } = await seedConnectedSender(
+      store,
+      cipher,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    const gmail = createFakeGmail();
+    const triggers = createScheduleTriggers();
+    next.store = store;
+    next.gmail = gmail.client;
+    next.triggers = triggers.triggers;
+    return { store, ownerToken, alice, bob, identity, gmail, triggers };
+  }
+
+  /** Tomorrow at this minute, in UTC, as a datetime-local value. */
+  function tomorrow() {
+    return new Date(Date.now() + 24 * 3600_000).toISOString().slice(0, 16);
+  }
+
+  function scheduleForm(values: Record<string, string>) {
+    return form({
+      subject: "Hello",
+      body: "Private scheduled body",
+      emails: "rahul@example.com",
+      type: "ONE_TIME",
+      startAt: tomorrow(),
+      timeZone: "UTC",
+      ...values,
+    });
+  }
+
+  it("requires a session", async () => {
+    await scheduleActionSetup();
+    for (const attempt of [
+      actions.createScheduleAction(idleFormState, scheduleForm({})),
+      actions.cancelScheduleAction(form({ scheduleId: "x" })),
+    ]) {
+      expect(await navigation(attempt)).toBe("/admin/login");
+    }
+  });
+
+  it("schedules for the signed-in user only, ignoring any user in the form, and sends nothing", async () => {
+    const context = await scheduleActionSetup();
+    signIn(context.alice.token);
+    const state = await actions.createScheduleAction(
+      idleFormState,
+      scheduleForm({
+        senderIdentityId: context.identity.id,
+        userId: context.bob.user.id,
+        createdBy: context.bob.user.id,
+      }),
+    );
+    expect(state).toMatchObject({ status: "success" });
+    expect(state.message).toMatch(/^Scheduled\. First send: .+ UTC\.$/);
+
+    const [schedule] = await context.store.listSchedules(context.alice.user.id);
+    expect(schedule).toMatchObject({
+      userId: context.alice.user.id,
+      createdBy: context.alice.user.id,
+      status: "ACTIVE",
+    });
+    expect(await context.store.listSchedules(context.bob.user.id)).toEqual([]);
+    expect(context.triggers.created).toHaveLength(1);
+    expect(context.gmail.calls).toHaveLength(0);
+    const output = JSON.stringify(state) + logs.join("\n");
+    expect(output).not.toContain("Private scheduled body");
+  });
+
+  it("refuses another user's sender, and reports invalid fields", async () => {
+    const context = await scheduleActionSetup();
+    signIn(context.bob.token);
+    expect(
+      await actions.createScheduleAction(
+        idleFormState,
+        scheduleForm({ senderIdentityId: context.identity.id }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      message: "Choose one of your own approved sender addresses.",
+    });
+
+    signIn(context.alice.token);
+    const invalid = await actions.createScheduleAction(
+      idleFormState,
+      scheduleForm({
+        senderIdentityId: context.identity.id,
+        timeZone: "IST",
+        startAt: "tomorrow",
+      }),
+    );
+    expect(invalid).toMatchObject({
+      status: "error",
+      message: "Check the highlighted fields. Nothing was scheduled.",
+      fieldErrors: {
+        timeZone: "Choose a time zone from the list.",
+        startAt: "Enter a valid date and time.",
+      },
+    });
+    expect(context.triggers.created).toHaveLength(0);
+  });
+
+  it("explains that scheduling is unavailable without Scheduler", async () => {
+    const context = await scheduleActionSetup();
+    next.triggers = null;
+    signIn(context.alice.token);
+    expect(
+      await actions.createScheduleAction(
+        idleFormState,
+        scheduleForm({ senderIdentityId: context.identity.id }),
+      ),
+    ).toMatchObject({
+      status: "error",
+      message:
+        "Scheduling is not configured on this server. Nothing was scheduled.",
+    });
+  });
+
+  it("lets only the owner of a schedule cancel it", async () => {
+    const context = await scheduleActionSetup();
+    signIn(context.alice.token);
+    await actions.createScheduleAction(
+      idleFormState,
+      scheduleForm({ senderIdentityId: context.identity.id }),
+    );
+    const [schedule] = await context.store.listSchedules(context.alice.user.id);
+
+    for (const token of [context.bob.token, context.ownerToken]) {
+      signIn(token);
+      await actions.cancelScheduleAction(form({ scheduleId: schedule.id }));
+    }
+    expect(
+      await context.store.getSchedule(context.alice.user.id, schedule.id),
+    ).toMatchObject({ status: "ACTIVE" });
+
+    signIn(context.alice.token);
+    await actions.cancelScheduleAction(form({ scheduleId: schedule.id }));
+    expect(
+      await context.store.getSchedule(context.alice.user.id, schedule.id),
+    ).toMatchObject({ status: "CANCELLED" });
+    expect(context.triggers.removed).toEqual([schedule.triggerName]);
   });
 });
 

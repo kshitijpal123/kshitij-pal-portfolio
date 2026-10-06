@@ -31,6 +31,7 @@ export function SendHistory({ records }: { records: SendRecord[] }) {
               </span>
               <StatusBadge value={record.status} />
               {record.bulk && <StatusBadge value="BULK" />}
+              {record.scheduleId && <StatusBadge value="SCHEDULED" />}
             </div>
             <p className="break-words">{record.subject}</p>
             <p className="text-caption text-muted-foreground">

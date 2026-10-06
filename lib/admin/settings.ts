@@ -15,6 +15,9 @@ export const defaultUserSettings: Readonly<SettingsInput> = {
   dailyTotalEmails: 50,
   dailyBulkRecipients: 25,
   maxBulkRecipientsPerOperation: 10,
+  maxScheduledEmails: 20,
+  maxRecurringSchedules: 5,
+  maxFutureSchedulingWindowDays: 30,
 };
 
 /** Daily limits reset at 00:00 UTC. */
@@ -91,6 +94,9 @@ export async function updateUserSettings(
     dailyTotalEmails: input.dailyTotalEmails,
     dailyBulkRecipients: input.dailyBulkRecipients,
     maxBulkRecipientsPerOperation: input.maxBulkRecipientsPerOperation,
+    maxScheduledEmails: input.maxScheduledEmails,
+    maxRecurringSchedules: input.maxRecurringSchedules,
+    maxFutureSchedulingWindowDays: input.maxFutureSchedulingWindowDays,
     updatedAt: now.toISOString(),
     updatedBy: actor.id,
   });

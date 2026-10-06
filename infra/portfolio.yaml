@@ -2,8 +2,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Portfolio production: CloudFront in front of the Next.js standalone server on
   AWS Lambda (function URL, Lambda Web Adapter), an S3 bucket for
-  /_next/static, a DynamoDB table for the private console, and a KMS key for
-  its Gmail credentials. Deployed by GitHub Actions; see
+  /_next/static, a DynamoDB table for the private console, a KMS key for its
+  Gmail credentials, and EventBridge Scheduler with a short-lived function for
+  its scheduled sends. Deployed by GitHub Actions; see
   docs/architecture/deployment.md.
 
 Parameters:
@@ -123,6 +124,19 @@ Resources:
             Condition:
               StringEquals:
                 kms:EncryptionContext:purpose: gmail-oauth-refresh-token
+          # Scheduled sends refresh Gmail access tokens (and re-encrypt a
+          # rotated refresh token) exactly as a send from the console does.
+          - Sid: ScheduleFunctionEncryptsGmailTokens
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt ScheduleFunctionRole.Arn
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:purpose: gmail-oauth-refresh-token
 
   AssetsBucket:
     Type: AWS::S3::Bucket
@@ -199,8 +213,32 @@ Resources:
                   - dynamodb:Query
                 Resource: !GetAtt AdminTable.Arn
 
+  # Creates and deletes the triggers of the console's schedules, in their
+  # group only, and lets Scheduler use only the invoke role. A separate
+  # resource because GmailTokenKey depends on ServerFunctionRole.
+  ServerFunctionSchedulePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref ServerFunctionRole
+      PolicyName: schedule-triggers
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+              - scheduler:DeleteSchedule
+            Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt SchedulerInvokeRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: scheduler.amazonaws.com
+
   ServerFunction:
     Type: AWS::Lambda::Function
+    DependsOn: ServerFunctionSchedulePolicy
     Properties:
       FunctionName: !Sub "${AWS::StackName}-server"
       Description: Next.js standalone server behind the Lambda Web Adapter.
@@ -234,6 +272,136 @@ Resources:
             - !Sub "${SiteUrl}/admin/oauth/google/callback"
             - ""
           GMAIL_TOKEN_KMS_KEY_ID: !GetAtt GmailTokenKey.Arn
+          SCHEDULER_GROUP_NAME: !Ref ScheduleGroup
+          SCHEDULER_TARGET_ARN: !GetAtt ScheduleFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
+
+  # Scheduled sends: EventBridge Scheduler holds one trigger per schedule in
+  # this group and, when an occurrence is due, invokes ScheduleFunction with
+  # only the schedule's ID and time. Nothing runs between occurrences.
+  ScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-mail"
+
+  ScheduleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-scheduler"
+      RetentionInDays: 30
+
+  ScheduleFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/${AWS::StackName}-lambda-boundary"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ScheduleLogGroup.Arn
+        # Reads schedules, claims occurrences, and records sends; it never
+        # deletes items.
+        - PolicyName: admin-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource: !GetAtt AdminTable.Arn
+        # Deletes triggers that must not fire again; it cannot create any.
+        - PolicyName: remove-schedule-triggers
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: scheduler:DeleteSchedule
+                Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/*"
+
+  # No function URL and no resource-based policy: only SchedulerInvokeRole
+  # can invoke it.
+  ScheduleFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-scheduler"
+      Description: Sends one due occurrence of a private console schedule.
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      Handler: index.handler
+      # Built by infra/package-scheduler.mts; replaced with an S3 location by
+      # `aws cloudformation package`.
+      Code: ../.aws-build/scheduler
+      MemorySize: 512
+      Timeout: 30
+      Role: !GetAtt ScheduleFunctionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref ScheduleLogGroup
+      Environment:
+        Variables:
+          NODE_ENV: production
+          ADMIN_TABLE_NAME: !Ref AdminTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
+          GOOGLE_OAUTH_REDIRECT_URI: !If
+            - HasSiteUrl
+            - !Sub "${SiteUrl}/admin/oauth/google/callback"
+            - ""
+          GMAIL_TOKEN_KMS_KEY_ID: !GetAtt GmailTokenKey.Arn
+          SCHEDULER_GROUP_NAME: !Ref ScheduleGroup
+
+  # Scheduler invokes asynchronously. Lambda retries a failed invocation once
+  # and drops events older than the occurrence's lateness window; repeats are
+  # harmless because each occurrence is claimed once.
+  ScheduleFunctionInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref ScheduleFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 1
+      MaximumEventAgeInSeconds: 3600
+
+  # Assumed only by EventBridge Scheduler, for this account's triggers in the
+  # console's group, to invoke only ScheduleFunction.
+  SchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/${AWS::StackName}-lambda-boundary"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${AWS::StackName}-mail/*"
+      Policies:
+        - PolicyName: invoke-schedule-function
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ScheduleFunction.Arn
 
   # AWS_IAM (CloudFront origin access control) would require browsers to sign
   # POST bodies with x-amz-content-sha256, which the contact form cannot do.
@@ -383,3 +551,5 @@ Outputs:
     Value: !Ref AdminTable
   GmailTokenKeyArn:
     Value: !GetAtt GmailTokenKey.Arn
+  ScheduleFunctionName:
+    Value: !Ref ScheduleFunction

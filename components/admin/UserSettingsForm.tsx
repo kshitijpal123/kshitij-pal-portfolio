@@ -20,6 +20,9 @@ const limits = [
   { name: "dailyTotalEmails", label: "Emails per day" },
   { name: "dailyBulkRecipients", label: "Bulk recipients per day" },
   { name: "maxBulkRecipientsPerOperation", label: "Recipients per bulk send" },
+  { name: "maxScheduledEmails", label: "Active schedules" },
+  { name: "maxRecurringSchedules", label: "Active repeating schedules" },
+  { name: "maxFutureSchedulingWindowDays", label: "Schedule ahead (days)" },
 ] as const;
 
 /** OWNER only: one user's feature switches and application limits. */

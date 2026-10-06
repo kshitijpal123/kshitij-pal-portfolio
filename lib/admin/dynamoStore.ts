@@ -18,13 +18,16 @@ import {
   type GmailConnection,
   type Invitation,
   type OAuthState,
+  type Schedule,
+  type ScheduleCounts,
+  type ScheduleRun,
   type SendRecord,
   type SenderIdentity,
   type Session,
   type User,
   type UserSettings,
 } from "@/lib/admin/model";
-import type { AdminStore } from "@/lib/admin/store";
+import type { AdminStore, ScheduleEnd } from "@/lib/admin/store";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -33,6 +36,9 @@ export const sendRecordRetentionMs = 90 * dayMs;
 
 /** Daily counters outlive their day briefly, so late releases still apply. */
 const usageRetentionMs = 8 * dayMs;
+
+/** Final schedules and occurrence runs are kept this long, then expire. */
+export const scheduleRetentionMs = 90 * dayMs;
 
 /**
  * Single-table layout (partition key `pk`, sort key `sk`). Every collection
@@ -64,6 +70,15 @@ const usageRetentionMs = 8 * dayMs;
  * | QUOTA#<userId>         | UTC day     | `total`, `bulk` counters (TTL)   |
  * | SEND#<userId>          | send id     | SendRecord, `expiresAtEpoch`     |
  *
+ * Schedules (M4):
+ *
+ * | pk                     | sk                     | Holds                  |
+ * | ---------------------- | ---------------------- | ---------------------- |
+ * | SCHEDULE#<userId>      | schedule id            | Schedule (TTL once final) |
+ * | SCHEDULE_ID            | schedule id            | `userId`: the owner    |
+ * | SCHEDULE_COUNT         | user id                | `active`, `recurring`  |
+ * | SCHEDULE_RUN#<userId>  | schedule id#occurrence | ScheduleRun (TTL)      |
+ *
  * Reads that decide authorization are strongly consistent.
  */
 const keys = {
@@ -93,11 +108,67 @@ const keys = {
   }),
   quota: (userId: string, day: string) => ({ pk: `QUOTA#${userId}`, sk: day }),
   send: (userId: string, id: string) => ({ pk: `SEND#${userId}`, sk: id }),
+  schedule: (userId: string, id: string) => ({
+    pk: `SCHEDULE#${userId}`,
+    sk: id,
+  }),
+  scheduleOwner: (id: string) => ({ pk: "SCHEDULE_ID", sk: id }),
+  scheduleCounts: (userId: string) => ({ pk: "SCHEDULE_COUNT", sk: userId }),
+  run: (userId: string, scheduleId: string, occurrence: string) => ({
+    pk: `SCHEDULE_RUN#${userId}`,
+    sk: `${scheduleId}#${occurrence}`,
+  }),
 };
 
 const notExists = "attribute_not_exists(pk)";
 
 type Item = Record<string, unknown>;
+
+/**
+ * An update expression with every attribute behind a name placeholder, so
+ * no field can collide with a DynamoDB reserved word.
+ */
+function updateOf(
+  set: Item,
+  add: Record<string, number> = {},
+  condition?: {
+    expression: string;
+    names: Record<string, string>;
+    values: Item;
+  },
+) {
+  const names: Record<string, string> = { ...condition?.names };
+  const values: Item = { ...condition?.values };
+  const sets = Object.entries(set).map(([field, value], index) => {
+    names[`#s${index}`] = field;
+    values[`:s${index}`] = value;
+    return `#s${index} = :s${index}`;
+  });
+  const adds = Object.entries(add).map(([field, value], index) => {
+    names[`#a${index}`] = field;
+    values[`:a${index}`] = value;
+    return `#a${index} :a${index}`;
+  });
+  return {
+    UpdateExpression: [
+      sets.length > 0 ? `SET ${sets.join(", ")}` : "",
+      adds.length > 0 ? `ADD ${adds.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    ...(condition ? { ConditionExpression: condition.expression } : {}),
+    ExpressionAttributeNames: names,
+    ...(Object.keys(values).length > 0
+      ? { ExpressionAttributeValues: values }
+      : {}),
+  };
+}
+
+const whileActive = {
+  expression: "#cStatus = :cActive",
+  names: { "#cStatus": "status" },
+  values: { ":cActive": "ACTIVE" },
+};
 
 function strip<T>(item: Item | undefined): T | null {
   if (!item) return null;
@@ -972,5 +1043,292 @@ export function createDynamoStore(
         Limit: limit,
       });
     },
+
+    listSchedules(userId) {
+      return queryAll<Schedule>(`SCHEDULE#${userId}`);
+    },
+
+    getSchedule(userId, scheduleId) {
+      return get<Schedule>(keys.schedule(userId, scheduleId));
+    },
+
+    async findSchedule(scheduleId) {
+      const owner = await get<{ userId: string }>(
+        keys.scheduleOwner(scheduleId),
+      );
+      if (!owner) return null;
+      const schedule = await get<Schedule>(
+        keys.schedule(owner.userId, scheduleId),
+      );
+      return schedule?.userId === owner.userId ? schedule : null;
+    },
+
+    async getScheduleCounts(userId) {
+      const counts = await get<Partial<ScheduleCounts>>(
+        keys.scheduleCounts(userId),
+      );
+      return {
+        active: counts?.active ?? 0,
+        recurring: counts?.recurring ?? 0,
+      };
+    },
+
+    /*
+     * One transaction: the counter update is conditional on staying within
+     * the limits (`count <= limit - 1`), the schedule and its owner pointer
+     * on not existing. Two simultaneous creations cannot both take the last
+     * slot.
+     */
+    async createSchedule(schedule, limits) {
+      const recurring = schedule.type === "RECURRING";
+      if (
+        limits.maxScheduledEmails < 1 ||
+        (recurring && limits.maxRecurringSchedules < 1)
+      ) {
+        return "limit";
+      }
+      try {
+        await transact([
+          {
+            Update: {
+              TableName,
+              Key: keys.scheduleCounts(schedule.userId),
+              UpdateExpression: recurring
+                ? "ADD #active :one, #recurring :one"
+                : "ADD #active :one",
+              ConditionExpression: recurring
+                ? "(attribute_not_exists(#active) OR #active <= :activeCeiling) AND (attribute_not_exists(#recurring) OR #recurring <= :recurringCeiling)"
+                : "attribute_not_exists(#active) OR #active <= :activeCeiling",
+              ExpressionAttributeNames: recurring
+                ? { "#active": "active", "#recurring": "recurring" }
+                : { "#active": "active" },
+              ExpressionAttributeValues: {
+                ":one": 1,
+                ":activeCeiling": limits.maxScheduledEmails - 1,
+                ...(recurring
+                  ? { ":recurringCeiling": limits.maxRecurringSchedules - 1 }
+                  : {}),
+              },
+            },
+          },
+          {
+            Put: {
+              TableName,
+              Item: {
+                ...keys.schedule(schedule.userId, schedule.id),
+                ...schedule,
+              },
+              ConditionExpression: notExists,
+            },
+          },
+          {
+            Put: {
+              TableName,
+              Item: {
+                ...keys.scheduleOwner(schedule.id),
+                userId: schedule.userId,
+              },
+              ConditionExpression: notExists,
+            },
+          },
+        ]);
+        return "created";
+      } catch (error) {
+        const failed = failedConditions(error);
+        if (failed?.[0]) return "limit";
+        throw error;
+      }
+    },
+
+    async endSchedule(schedule, end) {
+      try {
+        await transact(endItems(schedule, end, {}, {}));
+        return true;
+      } catch (error) {
+        if (failedConditions(error)) return false;
+        throw error;
+      }
+    },
+
+    /*
+     * The occurrence's run is created only if absent, together with a
+     * no-op write conditional on the schedule still being ACTIVE: a
+     * cancellation that commits first stops the occurrence, and a repeated
+     * invocation finds the run.
+     */
+    async claimScheduleRun(run) {
+      try {
+        await transact([
+          {
+            Put: {
+              TableName,
+              Item: {
+                ...keys.run(run.userId, run.scheduleId, run.occurrence),
+                ...run,
+                expiresAtEpoch: epochSeconds(
+                  Date.parse(run.createdAt) + scheduleRetentionMs,
+                ),
+              },
+              ConditionExpression: notExists,
+            },
+          },
+          {
+            Update: {
+              TableName,
+              Key: keys.schedule(run.userId, run.scheduleId),
+              UpdateExpression: "SET #cStatus = :cActive",
+              ConditionExpression: whileActive.expression,
+              ExpressionAttributeNames: whileActive.names,
+              ExpressionAttributeValues: whileActive.values,
+            },
+          },
+        ]);
+        return "claimed";
+      } catch (error) {
+        const failed = failedConditions(error);
+        if (!failed) throw error;
+        return failed[0] ? "duplicate" : "not-active";
+      }
+    },
+
+    getScheduleRun(userId, scheduleId, occurrence) {
+      return get<ScheduleRun>(keys.run(userId, scheduleId, occurrence));
+    },
+
+    async finishScheduleRun(schedule, run, completion, advance) {
+      const runUpdate = {
+        Update: {
+          TableName,
+          Key: keys.run(run.userId, run.scheduleId, run.occurrence),
+          ...updateOf(
+            {
+              status: completion.status,
+              failureCode: completion.failureCode,
+              sent: completion.sent,
+              failed: completion.failed,
+              uncertain: completion.uncertain,
+              completedAt: completion.at,
+            },
+            {},
+            {
+              expression: "#cStatus = :cReserved",
+              names: { "#cStatus": "status" },
+              values: { ":cReserved": "RESERVED" },
+            },
+          ),
+        },
+      };
+      const recorded = {
+        lastRunAt: completion.at,
+        lastRunStatus: completion.status,
+        lastRunFailure: completion.failureCode,
+        updatedAt: completion.at,
+      };
+      const counted = { runCount: 1 };
+      const scheduleItems =
+        advance.kind === "next"
+          ? [
+              {
+                Update: {
+                  TableName,
+                  Key: keys.schedule(run.userId, run.scheduleId),
+                  ...updateOf(
+                    { ...recorded, nextRunAt: advance.nextRunAt },
+                    counted,
+                    whileActive,
+                  ),
+                },
+              },
+            ]
+          : endItems(schedule, advance.end, recorded, counted);
+
+      try {
+        await transact([runUpdate, ...scheduleItems]);
+        return;
+      } catch (error) {
+        const failed = failedConditions(error);
+        if (!failed) throw error;
+        if (failed[0]) return;
+      }
+      // The schedule left ACTIVE meanwhile (cancelled): keep its status,
+      // still record what this occurrence did.
+      try {
+        await transact([
+          runUpdate,
+          {
+            Update: {
+              TableName,
+              Key: keys.schedule(run.userId, run.scheduleId),
+              ...updateOf(recorded, counted, {
+                expression: "attribute_exists(pk)",
+                names: {},
+                values: {},
+              }),
+            },
+          },
+        ]);
+      } catch (error) {
+        if (!failedConditions(error)) throw error;
+      }
+    },
   };
+
+  /**
+   * Items that move an ACTIVE schedule to a final state, release its count,
+   * and let the schedule and its owner pointer expire later. The stored type
+   * must match, so the right counters are released.
+   */
+  function endItems(
+    schedule: Pick<Schedule, "userId" | "id" | "type">,
+    end: ScheduleEnd,
+    extraSet: Item,
+    extraAdd: Record<string, number>,
+  ) {
+    const ttl = epochSeconds(Date.parse(end.at) + scheduleRetentionMs);
+    const endedAt = end.status === "CANCELLED" ? "cancelledAt" : "completedAt";
+    const recurring = schedule.type === "RECURRING";
+    return [
+      {
+        Update: {
+          TableName,
+          Key: keys.schedule(schedule.userId, schedule.id),
+          ...updateOf(
+            {
+              ...extraSet,
+              status: end.status,
+              updatedAt: end.at,
+              nextRunAt: null,
+              body: "",
+              failureCode: end.failureCode,
+              [endedAt]: end.at,
+              expiresAtEpoch: ttl,
+            },
+            extraAdd,
+            {
+              expression: `${whileActive.expression} AND #cType = :cType`,
+              names: { ...whileActive.names, "#cType": "type" },
+              values: { ...whileActive.values, ":cType": schedule.type },
+            },
+          ),
+        },
+      },
+      {
+        Update: {
+          TableName,
+          Key: keys.scheduleCounts(schedule.userId),
+          ...updateOf(
+            {},
+            recurring ? { active: -1, recurring: -1 } : { active: -1 },
+          ),
+        },
+      },
+      {
+        Update: {
+          TableName,
+          Key: keys.scheduleOwner(schedule.id),
+          ...updateOf({ expiresAtEpoch: ttl }),
+        },
+      },
+    ];
+  }
 }

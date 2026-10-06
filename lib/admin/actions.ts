@@ -30,6 +30,13 @@ import {
   revokeInvitation,
 } from "@/lib/admin/invitations";
 import { maxUsers } from "@/lib/admin/model";
+import { formatInZone } from "@/lib/admin/recurrence";
+import { getScheduleTriggers } from "@/lib/admin/scheduler";
+import {
+  cancelSchedule,
+  createSchedule,
+  describeScheduleRejection,
+} from "@/lib/admin/schedules";
 import {
   requestSenderIdentity,
   reviewSenderIdentity,
@@ -65,6 +72,7 @@ import {
   validateNewAccount,
   validateOwnerSetup,
   validateRejectionReason,
+  validateSchedule,
   validateSend,
   validateSettings,
   validateTemplate,
@@ -615,10 +623,74 @@ export async function sendEmailAction(
   };
 }
 
+/**
+ * Stores a schedule and registers its trigger; nothing is sent now. The
+ * owner is always the signed-in actor.
+ */
+export async function createScheduleAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const actor = await requireUser();
+  const parsed = validateSchedule(formData);
+  if (!parsed.success) {
+    return {
+      status: "error",
+      fieldErrors: parsed.errors,
+      message: "Check the highlighted fields. Nothing was scheduled.",
+    };
+  }
+
+  let outcome;
+  try {
+    outcome = await createSchedule(
+      { store: getAdminStore(), triggers: getScheduleTriggers() },
+      actor,
+      parsed.data,
+      new Date(),
+    );
+  } catch (error) {
+    logFailure("Schedule", error);
+    return {
+      status: "error",
+      message:
+        "Something went wrong. Check the schedules below before trying again.",
+    };
+  }
+
+  revalidatePath("/admin/schedules");
+  if (!outcome.ok) {
+    return { status: "error", message: describeScheduleRejection(outcome) };
+  }
+  return {
+    status: "success",
+    message: `Scheduled. First send: ${formatInZone(outcome.schedule.nextRunAt ?? outcome.schedule.startAt, outcome.schedule.timeZone)}.`,
+  };
+}
+
+/** Cancels one of the actor's own schedules; anyone else's is not found. */
+export async function cancelScheduleAction(formData: FormData) {
+  const actor = await requireUser();
+  try {
+    await cancelSchedule(
+      { store: getAdminStore(), triggers: getScheduleTriggers() },
+      actor,
+      readField(formData, "scheduleId"),
+      new Date(),
+    );
+  } catch (error) {
+    logFailure("Schedule cancellation", error);
+  }
+  revalidatePath("/admin/schedules");
+}
+
 const settingsFields = [
   "dailyTotalEmails",
   "dailyBulkRecipients",
   "maxBulkRecipientsPerOperation",
+  "maxScheduledEmails",
+  "maxRecurringSchedules",
+  "maxFutureSchedulingWindowDays",
 ] as const;
 
 /** OWNER only; the domain function refuses anyone else. */

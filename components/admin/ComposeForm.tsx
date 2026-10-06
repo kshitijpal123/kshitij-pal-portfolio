@@ -35,7 +35,7 @@ type ComposeFormProps = {
   maxRecipients: number;
 };
 
-function FieldError({ id, error }: { id: string; error?: string }) {
+export function FieldError({ id, error }: { id: string; error?: string }) {
   return error ? (
     <p id={id} className="mt-2 text-body-sm text-danger">
       {error}
@@ -50,22 +50,23 @@ function splitEmails(value: string) {
     .filter(Boolean);
 }
 
-type FieldsProps = Omit<ComposeFormProps, "operationId"> & {
+export type ComposeFieldsProps = Omit<ComposeFormProps, "operationId"> & {
   errors: ComposeState["fieldErrors"];
 };
 
 /**
- * The editable draft. Remounted (cleared) only after a fully successful
- * send; after an error or partial failure the draft stays as it was.
+ * The editable draft, shared with the schedule form. Remounted (cleared)
+ * only after a fully successful submission; after an error or partial
+ * failure the draft stays as it was.
  */
-function ComposeFields({
+export function ComposeFields({
   senders,
   contacts,
   templates,
   bulkEnabled,
   maxRecipients,
   errors,
-}: FieldsProps) {
+}: ComposeFieldsProps) {
   const [senderId, setSenderId] = useState(senders[0]?.id ?? "");
   const [templateId, setTemplateId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);

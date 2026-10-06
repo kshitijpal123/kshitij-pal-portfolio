@@ -7,13 +7,16 @@ import {
   type GmailConnection,
   type Invitation,
   type OAuthState,
+  type Schedule,
+  type ScheduleCounts,
+  type ScheduleRun,
   type SendRecord,
   type SenderIdentity,
   type Session,
   type User,
   type UserSettings,
 } from "@/lib/admin/model";
-import type { AdminStore } from "@/lib/admin/store";
+import type { AdminStore, ScheduleEnd } from "@/lib/admin/store";
 
 /** Identities that hold their address, so no one else can request it. */
 const claimingStatuses = new Set(["REQUESTED", "APPROVED"]);
@@ -38,6 +41,10 @@ export function createMemoryStore(): AdminStore {
   const templates = new Map<string, EmailTemplate>();
   const sends = new Map<string, SendRecord>();
   const usage = new Map<string, DailyUsage>();
+  const schedules = new Map<string, Schedule>();
+  const scheduleCounts = new Map<string, ScheduleCounts>();
+  /** Keyed by `<userId> <scheduleId>#<occurrence>`. */
+  const runs = new Map<string, ScheduleRun>();
 
   const copy = <T>(value: T): T => structuredClone(value);
   const owned = (userId: string, id: string) => `${userId} ${id}`;
@@ -51,6 +58,26 @@ export function createMemoryStore(): AdminStore {
     usage.get(owned(userId, day)) ?? { total: 0, bulk: 0 };
   const findUserByEmail = (email: string) =>
     [...users.values()].find((user) => user.email === email);
+  const countsOf = (userId: string) =>
+    scheduleCounts.get(userId) ?? { active: 0, recurring: 0 };
+  const runKey = (userId: string, scheduleId: string, occurrence: string) =>
+    owned(userId, `${scheduleId}#${occurrence}`);
+
+  /** Applies a final state to a stored ACTIVE schedule and releases it. */
+  function applyEnd(stored: Schedule, end: ScheduleEnd) {
+    stored.status = end.status;
+    stored.updatedAt = end.at;
+    stored.nextRunAt = null;
+    stored.body = "";
+    stored.failureCode = end.failureCode;
+    if (end.status === "CANCELLED") stored.cancelledAt = end.at;
+    else stored.completedAt = end.at;
+    const counts = countsOf(stored.userId);
+    scheduleCounts.set(stored.userId, {
+      active: counts.active - 1,
+      recurring: counts.recurring - (stored.type === "RECURRING" ? 1 : 0),
+    });
+  }
 
   return {
     async ownerExists() {
@@ -382,6 +409,91 @@ export function createMemoryStore(): AdminStore {
         .sort((a, b) => b.id.localeCompare(a.id))
         .slice(0, limit)
         .map(copy);
+    },
+
+    async listSchedules(userId) {
+      return [...schedules.values()]
+        .filter((schedule) => schedule.userId === userId)
+        .map(copy);
+    },
+
+    async getSchedule(userId, scheduleId) {
+      const schedule = schedules.get(owned(userId, scheduleId));
+      return schedule ? copy(schedule) : null;
+    },
+
+    async findSchedule(scheduleId) {
+      const schedule = [...schedules.values()].find(
+        (candidate) => candidate.id === scheduleId,
+      );
+      return schedule ? copy(schedule) : null;
+    },
+
+    async getScheduleCounts(userId) {
+      return copy(countsOf(userId));
+    },
+
+    async createSchedule(schedule, limits) {
+      const counts = countsOf(schedule.userId);
+      const recurring = schedule.type === "RECURRING";
+      if (
+        counts.active + 1 > limits.maxScheduledEmails ||
+        (recurring && counts.recurring + 1 > limits.maxRecurringSchedules)
+      ) {
+        return "limit";
+      }
+      scheduleCounts.set(schedule.userId, {
+        active: counts.active + 1,
+        recurring: counts.recurring + (recurring ? 1 : 0),
+      });
+      schedules.set(owned(schedule.userId, schedule.id), copy(schedule));
+      return "created";
+    },
+
+    async endSchedule(schedule, end) {
+      const stored = schedules.get(owned(schedule.userId, schedule.id));
+      if (!stored || stored.status !== "ACTIVE") return false;
+      applyEnd(stored, end);
+      return true;
+    },
+
+    async claimScheduleRun(run) {
+      const key = runKey(run.userId, run.scheduleId, run.occurrence);
+      if (runs.has(key)) return "duplicate";
+      const schedule = schedules.get(owned(run.userId, run.scheduleId));
+      if (schedule?.status !== "ACTIVE") return "not-active";
+      runs.set(key, copy(run));
+      return "claimed";
+    },
+
+    async getScheduleRun(userId, scheduleId, occurrence) {
+      const run = runs.get(runKey(userId, scheduleId, occurrence));
+      return run ? copy(run) : null;
+    },
+
+    async finishScheduleRun(_schedule, run, completion, advance) {
+      const stored = runs.get(
+        runKey(run.userId, run.scheduleId, run.occurrence),
+      );
+      if (!stored || stored.status !== "RESERVED") return;
+      Object.assign(stored, {
+        status: completion.status,
+        failureCode: completion.failureCode,
+        sent: completion.sent,
+        failed: completion.failed,
+        uncertain: completion.uncertain,
+        completedAt: completion.at,
+      });
+      const schedule = schedules.get(owned(run.userId, run.scheduleId));
+      if (!schedule) return;
+      schedule.lastRunAt = completion.at;
+      schedule.lastRunStatus = completion.status;
+      schedule.lastRunFailure = completion.failureCode;
+      schedule.runCount += 1;
+      schedule.updatedAt = completion.at;
+      if (schedule.status !== "ACTIVE") return;
+      if (advance.kind === "next") schedule.nextRunAt = advance.nextRunAt;
+      else applyEnd(schedule, advance.end);
     },
   };
 }

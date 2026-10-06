@@ -9,6 +9,7 @@ import type { PublicUser } from "@/lib/admin/model";
 export type AdminPage =
   | "dashboard"
   | "compose"
+  | "schedules"
   | "contacts"
   | "templates"
   | "senders"
@@ -23,6 +24,7 @@ const navigation: {
 }[] = [
   { page: "dashboard", label: "Dashboard", href: "/admin" },
   { page: "compose", label: "Compose", href: "/admin/compose" },
+  { page: "schedules", label: "Schedules", href: "/admin/schedules" },
   { page: "contacts", label: "Contacts", href: "/admin/contacts" },
   { page: "templates", label: "Templates", href: "/admin/templates" },
   { page: "senders", label: "Sender identities", href: "/admin/senders" },

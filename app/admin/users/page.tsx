@@ -76,7 +76,10 @@ export default async function UsersPage() {
             {defaultUserSettings.dailyTotalEmails} emails and{" "}
             {defaultUserSettings.dailyBulkRecipients} bulk recipients per day,{" "}
             {defaultUserSettings.maxBulkRecipientsPerOperation} recipients per
-            bulk send.
+            bulk send; {defaultUserSettings.maxScheduledEmails} active
+            schedules, of which {defaultUserSettings.maxRecurringSchedules}{" "}
+            repeating, with the first send at most{" "}
+            {defaultUserSettings.maxFutureSchedulingWindowDays} days ahead.
           </p>
           <ul className="mt-4 divide-y divide-border border-y border-border">
             {users.map((user) => {

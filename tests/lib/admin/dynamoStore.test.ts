@@ -15,6 +15,8 @@ import type {
   GmailConnection,
   Invitation,
   OAuthState,
+  Schedule,
+  ScheduleRun,
   SendRecord,
   User,
   UserSettings,
@@ -471,6 +473,9 @@ describe("createDynamoStore", () => {
       dailyTotalEmails: 50,
       dailyBulkRecipients: 25,
       maxBulkRecipientsPerOperation: 10,
+      maxScheduledEmails: 20,
+      maxRecurringSchedules: 5,
+      maxFutureSchedulingWindowDays: 30,
       updatedAt: now.toISOString(),
       updatedBy: "owner",
     };
@@ -862,5 +867,257 @@ describe("createDynamoStore", () => {
       }),
     );
     await expect(store.listUsers()).rejects.toThrow("boom");
+  });
+});
+
+describe("DynamoDB schedules", () => {
+  const schedule: Schedule = {
+    id: "sch1",
+    userId: "u1",
+    type: "RECURRING",
+    status: "ACTIVE",
+    senderIdentityId: "s1",
+    senderEmail: "friend@gmail.com",
+    contactIds: [],
+    emails: ["rahul@example.com"],
+    templateId: null,
+    subject: "Hello",
+    body: "Body",
+    timeZone: "Asia/Kolkata",
+    startLocal: "2026-10-07T10:00",
+    startAt: "2026-10-07T04:30:00.000Z",
+    endAt: null,
+    recurrence: { frequency: "DAILY", time: "10:00" },
+    nextRunAt: "2026-10-07T04:30:00.000Z",
+    lastRunAt: null,
+    lastRunStatus: null,
+    lastRunFailure: null,
+    runCount: 0,
+    triggerName: "mail-sch1",
+    failureCode: null,
+    createdBy: "u1",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    cancelledAt: null,
+    completedAt: null,
+  };
+  const run: ScheduleRun = {
+    scheduleId: "sch1",
+    userId: "u1",
+    occurrence: "2026-10-07T10:00",
+    scheduledFor: "2026-10-07T04:30:00.000Z",
+    operationId: "1791347400000.abcdefghijklmnopqrstuv",
+    status: "RESERVED",
+    failureCode: null,
+    sent: 0,
+    failed: 0,
+    uncertain: 0,
+    createdAt: "2026-10-07T04:30:00.000Z",
+    completedAt: null,
+  };
+  const limits = { maxScheduledEmails: 20, maxRecurringSchedules: 5 };
+  type Transaction = {
+    TransactItems: Record<string, Record<string, unknown>>[];
+  };
+  const items = (command: Command) =>
+    (command.input as Transaction).TransactItems;
+
+  it("creates a schedule, its owner pointer, and its count in one conditional transaction", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.createSchedule(schedule, limits)).toBe("created");
+    const [command] = fake.calls();
+    expect(command).toBeInstanceOf(TransactWriteCommand);
+    const [counts, put, pointer] = items(command);
+    expect(counts.Update).toMatchObject({
+      Key: { pk: "SCHEDULE_COUNT", sk: "u1" },
+      UpdateExpression: "ADD #active :one, #recurring :one",
+      ExpressionAttributeValues: {
+        ":one": 1,
+        ":activeCeiling": 19,
+        ":recurringCeiling": 4,
+      },
+    });
+    expect(counts.Update.ConditionExpression).toContain(
+      "#active <= :activeCeiling",
+    );
+    expect(counts.Update.ConditionExpression).toContain(
+      "#recurring <= :recurringCeiling",
+    );
+    expect(put.Put).toMatchObject({
+      Item: { pk: "SCHEDULE#u1", sk: "sch1", userId: "u1", status: "ACTIVE" },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+    expect(pointer.Put).toMatchObject({
+      Item: { pk: "SCHEDULE_ID", sk: "sch1", userId: "u1" },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+  });
+
+  it("reports the limit when the count condition fails, and never writes at a zero limit", async () => {
+    const full = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("ConditionalCheckFailed", "None", "None");
+      }),
+    );
+    expect(await full.createSchedule(schedule, limits)).toBe("limit");
+
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(
+      await store.createSchedule(schedule, {
+        maxScheduledEmails: 20,
+        maxRecurringSchedules: 0,
+      }),
+    ).toBe("limit");
+    expect(fake.calls()).toHaveLength(0);
+  });
+
+  it("finds a schedule by ID only through its owner pointer", async () => {
+    const fake = client((command) => {
+      const key = command.input.Key as { pk: string };
+      return key.pk === "SCHEDULE_ID"
+        ? { Item: { pk: "SCHEDULE_ID", sk: "sch1", userId: "u1" } }
+        : { Item: { pk: "SCHEDULE#u1", sk: "sch1", ...schedule } };
+    });
+    const store = createDynamoStore("table", fake);
+    expect(await store.findSchedule("sch1")).toEqual(schedule);
+    expect(fake.calls().map((call) => call.input.Key)).toEqual([
+      { pk: "SCHEDULE_ID", sk: "sch1" },
+      { pk: "SCHEDULE#u1", sk: "sch1" },
+    ]);
+    expect(fake.calls().every((call) => call instanceof GetCommand)).toBe(true);
+  });
+
+  it("ends only an ACTIVE schedule of the stored type, releasing its counts", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(
+      await store.endSchedule(schedule, {
+        status: "CANCELLED",
+        at: now.toISOString(),
+        failureCode: null,
+      }),
+    ).toBe(true);
+    const [update, counts, pointer] = items(fake.calls()[0]);
+    expect(update.Update.ConditionExpression).toBe(
+      "#cStatus = :cActive AND #cType = :cType",
+    );
+    expect(update.Update.ExpressionAttributeValues).toMatchObject({
+      ":cActive": "ACTIVE",
+      ":cType": "RECURRING",
+    });
+    expect(
+      Object.values(update.Update.ExpressionAttributeNames as object),
+    ).toEqual(
+      expect.arrayContaining([
+        "status",
+        "body",
+        "cancelledAt",
+        "expiresAtEpoch",
+      ]),
+    );
+    expect(
+      Object.values(update.Update.ExpressionAttributeValues as object),
+    ).toContain("");
+    expect(counts.Update).toMatchObject({
+      Key: { pk: "SCHEDULE_COUNT", sk: "u1" },
+      ExpressionAttributeValues: { ":a0": -1, ":a1": -1 },
+    });
+    expect(pointer.Update.Key).toEqual({ pk: "SCHEDULE_ID", sk: "sch1" });
+
+    const ended = createDynamoStore(
+      "table",
+      client(() => {
+        throw cancelled("ConditionalCheckFailed", "None", "None");
+      }),
+    );
+    expect(
+      await ended.endSchedule(schedule, {
+        status: "CANCELLED",
+        at: now.toISOString(),
+        failureCode: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("claims an occurrence once, only while the schedule is ACTIVE", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    expect(await store.claimScheduleRun(run)).toBe("claimed");
+    const [put, guard] = items(fake.calls()[0]);
+    expect(put.Put).toMatchObject({
+      Item: {
+        pk: "SCHEDULE_RUN#u1",
+        sk: "sch1#2026-10-07T10:00",
+        status: "RESERVED",
+      },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+    expect(
+      typeof (put.Put.Item as { expiresAtEpoch: unknown }).expiresAtEpoch,
+    ).toBe("number");
+    expect(guard.Update).toMatchObject({
+      Key: { pk: "SCHEDULE#u1", sk: "sch1" },
+      ConditionExpression: "#cStatus = :cActive",
+    });
+
+    for (const [codes, outcome] of [
+      [["ConditionalCheckFailed", "None"], "duplicate"],
+      [["ConditionalCheckFailed", "ConditionalCheckFailed"], "duplicate"],
+      [["None", "ConditionalCheckFailed"], "not-active"],
+    ] as const) {
+      const failing = createDynamoStore(
+        "table",
+        client(() => {
+          throw cancelled(...codes);
+        }),
+      );
+      expect(await failing.claimScheduleRun(run)).toBe(outcome);
+    }
+  });
+
+  it("records a finished run and advances only an ACTIVE schedule", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    const completion = {
+      status: "SENT" as const,
+      failureCode: null,
+      sent: 1,
+      failed: 0,
+      uncertain: 0,
+      at: "2026-10-07T04:30:05.000Z",
+    };
+    await store.finishScheduleRun(schedule, run, completion, {
+      kind: "next",
+      nextRunAt: "2026-10-08T04:30:00.000Z",
+    });
+    const [runUpdate, scheduleUpdate] = items(fake.calls()[0]);
+    expect(runUpdate.Update.ConditionExpression).toBe("#cStatus = :cReserved");
+    expect(scheduleUpdate.Update.ConditionExpression).toBe(
+      "#cStatus = :cActive",
+    );
+    expect(
+      Object.values(scheduleUpdate.Update.ExpressionAttributeValues as object),
+    ).toContain("2026-10-08T04:30:00.000Z");
+
+    let call = 0;
+    const raced = client(() => {
+      call += 1;
+      if (call === 1) throw cancelled("None", "ConditionalCheckFailed");
+      return {};
+    });
+    await createDynamoStore("table", raced).finishScheduleRun(
+      schedule,
+      run,
+      completion,
+      { kind: "next", nextRunAt: "2026-10-08T04:30:00.000Z" },
+    );
+    const [, fallback] = items(raced.calls()[1]);
+    expect(fallback.Update.ConditionExpression).toBe("attribute_exists(pk)");
+    expect(
+      Object.values(fallback.Update.ExpressionAttributeNames as object),
+    ).not.toContain("status");
   });
 });

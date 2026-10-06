@@ -1,7 +1,18 @@
 import {
+  maxDayOfMonth,
+  type RecurrenceRule,
+  type ScheduleType,
+  weekdays,
+} from "@/lib/admin/model";
+import {
   findTemplateProblem,
   type PlaceholderProblem,
 } from "@/lib/admin/personalization";
+import {
+  isValidDayOfMonth,
+  isValidTimeZone,
+  parseLocal,
+} from "@/lib/admin/recurrence";
 
 export const adminLimits = {
   email: { max: 254 },
@@ -271,8 +282,8 @@ export function isWellFormedOperationId(value: string) {
   return operationIdPattern.test(value);
 }
 
-export type SendInput = {
-  operationId: string;
+/** A message and its recipients, before it is sent or scheduled. */
+export type SendDraft = {
   senderIdentityId: string;
   contactIds: string[];
   emails: string[];
@@ -281,14 +292,15 @@ export type SendInput = {
   body: string;
 };
 
+export type SendInput = SendDraft & { operationId: string };
+
 type SendField = "senderIdentityId" | "recipients" | "subject" | "body";
 
 /**
  * Shape and size only. Ownership of the sender, contacts, and template, and
  * every limit, are decided on the server from the session, never from here.
  */
-export function validateSend(input: FormData) {
-  const operationId = readField(input, "operationId");
+function validateDraft(input: FormData) {
   const senderIdentityId = readField(input, "senderIdentityId");
   const contactIds = [
     ...new Set(
@@ -323,6 +335,15 @@ export function validateSend(input: FormData) {
     subject: validateSubject(subject),
     body: validateBody(body),
   };
+  return {
+    draft: { senderIdentityId, contactIds, emails, templateId, subject, body },
+    errors,
+  };
+}
+
+export function validateSend(input: FormData) {
+  const operationId = readField(input, "operationId");
+  const { draft, errors } = validateDraft(input);
   if (!isWellFormedOperationId(operationId)) {
     return {
       success: false as const,
@@ -332,15 +353,104 @@ export function validateSend(input: FormData) {
       },
     };
   }
-  return finish<SendField, SendInput>(
+  return finish<SendField, SendInput>({ operationId, ...draft }, errors);
+}
+
+export type ScheduleInput = SendDraft & {
+  type: ScheduleType;
+  /** `YYYY-MM-DDTHH:mm` in `timeZone`. */
+  startLocal: string;
+  /** Recurring only; `null` for no end. */
+  endLocal: string | null;
+  timeZone: string;
+  /** Recurring only. The local time comes from `startLocal`. */
+  recurrence: RecurrenceRule | null;
+};
+
+type ScheduleField =
+  | SendField
+  | "type"
+  | "startAt"
+  | "endAt"
+  | "timeZone"
+  | "frequency"
+  | "weekdays"
+  | "dayOfMonth";
+
+function readRecurrence(input: FormData): {
+  recurrence: ScheduleInput["recurrence"];
+  errors: FieldErrors<ScheduleField>;
+} {
+  const frequency = readField(input, "frequency");
+  if (frequency === "DAILY") {
+    return { recurrence: { frequency }, errors: {} };
+  }
+  if (frequency === "WEEKLY") {
+    const chosen = new Set(input.getAll("weekday"));
+    const days = weekdays.filter((day) => chosen.has(day));
+    return days.length > 0
+      ? { recurrence: { frequency, weekdays: days }, errors: {} }
+      : { recurrence: null, errors: { weekdays: "Choose at least one day." } };
+  }
+  if (frequency === "MONTHLY") {
+    const raw = readField(input, "dayOfMonth").trim();
+    const day = /^\d{1,2}$/.test(raw) ? Number(raw) : Number.NaN;
+    return isValidDayOfMonth(day)
+      ? { recurrence: { frequency, dayOfMonth: day }, errors: {} }
+      : {
+          recurrence: null,
+          errors: {
+            dayOfMonth: `Enter a day from 1 to ${maxDayOfMonth}.`,
+          },
+        };
+  }
+  return {
+    recurrence: null,
+    errors: { frequency: "Choose how often to send." },
+  };
+}
+
+/**
+ * Shape only, like `validateSend`. Whether the times are in the future,
+ * within the owner's window, and within the schedule limits is decided by
+ * the server when the schedule is created.
+ */
+export function validateSchedule(input: FormData) {
+  const { draft, errors: draftErrors } = validateDraft(input);
+  const rawType = readField(input, "type");
+  const type: ScheduleType | null =
+    rawType === "ONE_TIME" || rawType === "RECURRING" ? rawType : null;
+  const startLocal = readField(input, "startAt").trim();
+  const timeZone = readField(input, "timeZone").trim();
+  const recurring = type === "RECURRING";
+  const rawEnd = recurring ? readField(input, "endAt").trim() : "";
+  const { recurrence, errors: recurrenceErrors } = recurring
+    ? readRecurrence(input)
+    : { recurrence: null, errors: {} };
+
+  const errors: FieldErrors<ScheduleField> = {
+    ...draftErrors,
+    ...recurrenceErrors,
+    type: type ? undefined : "Choose when to send.",
+    startAt: parseLocal(startLocal)
+      ? undefined
+      : "Enter a valid date and time.",
+    endAt:
+      rawEnd && !parseLocal(rawEnd)
+        ? "Enter a valid date and time, or leave it empty."
+        : undefined,
+    timeZone: isValidTimeZone(timeZone)
+      ? undefined
+      : "Choose a time zone from the list.",
+  };
+  return finish<ScheduleField, ScheduleInput>(
     {
-      operationId,
-      senderIdentityId,
-      contactIds,
-      emails,
-      templateId,
-      subject,
-      body,
+      ...draft,
+      type: type ?? "ONE_TIME",
+      startLocal,
+      endLocal: rawEnd || null,
+      timeZone,
+      recurrence,
     },
     errors,
   );
@@ -351,6 +461,9 @@ export const settingBounds = {
   dailyBulkRecipients: { min: 0, max: 500 },
   /** Bounded by what one request can send within the function's timeout. */
   maxBulkRecipientsPerOperation: { min: 1, max: 20 },
+  maxScheduledEmails: { min: 0, max: 100 },
+  maxRecurringSchedules: { min: 0, max: 20 },
+  maxFutureSchedulingWindowDays: { min: 1, max: 365 },
 } as const;
 
 export type SettingsInput = {
@@ -361,6 +474,9 @@ export type SettingsInput = {
   dailyTotalEmails: number;
   dailyBulkRecipients: number;
   maxBulkRecipientsPerOperation: number;
+  maxScheduledEmails: number;
+  maxRecurringSchedules: number;
+  maxFutureSchedulingWindowDays: number;
 };
 
 type LimitField = keyof typeof settingBounds;
