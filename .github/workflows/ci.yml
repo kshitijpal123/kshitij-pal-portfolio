@@ -221,4 +221,3 @@ jobs:
           status=$(curl -s -o /dev/null -w "%{http_code}" "$DISTRIBUTION_URL/")
           echo "GET $DISTRIBUTION_URL/ -> $status"
           [ "$status" = "200" ]
-```
