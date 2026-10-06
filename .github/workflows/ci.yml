@@ -53,6 +53,7 @@ jobs:
       CONTACT_TO_EMAIL: ${{ vars.CONTACT_TO_EMAIL }}
       CONTACT_FROM_EMAIL: ${{ vars.CONTACT_FROM_EMAIL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
     steps:
       - name: Check deployment configuration
         run: |
@@ -121,6 +122,8 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           # Optional; empty keeps /admin/setup closed. Remove it after setup.
           ADMIN_BOOTSTRAP_TOKEN: ${{ secrets.ADMIN_BOOTSTRAP_TOKEN }}
+          # Optional; empty leaves Gmail connection unavailable.
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
@@ -132,7 +135,10 @@ jobs:
               "ResendApiKey=$RESEND_API_KEY" \
               "ContactToEmail=$CONTACT_TO_EMAIL" \
               "ContactFromEmail=$CONTACT_FROM_EMAIL" \
-              "AdminBootstrapToken=$ADMIN_BOOTSTRAP_TOKEN"
+              "AdminBootstrapToken=$ADMIN_BOOTSTRAP_TOKEN" \
+              "SiteUrl=$SITE_URL" \
+              "GoogleClientId=$GOOGLE_CLIENT_ID" \
+              "GoogleClientSecret=$GOOGLE_CLIENT_SECRET"
 
       - name: Read stack outputs
         id: stack

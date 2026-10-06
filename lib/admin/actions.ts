@@ -11,6 +11,12 @@ import {
 import type { FormState } from "@/lib/admin/formState";
 import { getAdminStore } from "@/lib/admin/getAdminStore";
 import {
+  disconnectGmail,
+  startGmailConnection,
+  verifyGmailConnection,
+} from "@/lib/admin/gmailConnections";
+import { getGoogleOAuthClient } from "@/lib/admin/googleOAuth";
+import {
   acceptInvitation,
   createInvitation,
   invitationPath,
@@ -28,6 +34,7 @@ import {
   requireUser,
   setSessionCookie,
 } from "@/lib/admin/session";
+import { getTokenCipher } from "@/lib/admin/tokenCipher";
 import { setUserStatus } from "@/lib/admin/users";
 import {
   normalizeEmail,
@@ -312,4 +319,82 @@ export async function reviewSenderIdentityAction(formData: FormData) {
     new Date(),
   );
   revalidatePath("/admin/approvals");
+}
+
+/*
+ * Gmail actions take only a sender identity ID from the form; the domain
+ * functions accept it only when it belongs to the signed-in user. Results
+ * come back to the dashboard as a fixed `?gmail=` code, never as tokens.
+ */
+const gmailResult = (code: string) => `/admin?gmail=${code}`;
+
+export async function startGmailConnectionAction(formData: FormData) {
+  const actor = await requireUser();
+  const sessionToken = await readSessionCookie();
+  const google = getGoogleOAuthClient();
+  const cipher = getTokenCipher();
+
+  let destination = gmailResult("unavailable");
+  if (google && cipher && sessionToken) {
+    try {
+      const outcome = await startGmailConnection(
+        { store: getAdminStore(), google },
+        actor,
+        sessionToken,
+        readField(formData, "identityId"),
+        new Date(),
+      );
+      destination = outcome.ok
+        ? outcome.authorizationUrl
+        : gmailResult(outcome.reason);
+    } catch (error) {
+      logFailure("Gmail connection start", error);
+      destination = gmailResult("failed");
+    }
+  }
+  redirect(destination);
+}
+
+export async function verifyGmailConnectionAction(formData: FormData) {
+  const actor = await requireUser();
+  const google = getGoogleOAuthClient();
+  const cipher = getTokenCipher();
+
+  let outcome: string = "unavailable";
+  if (google && cipher) {
+    try {
+      outcome = await verifyGmailConnection(
+        { store: getAdminStore(), google, cipher },
+        actor,
+        readField(formData, "identityId"),
+        new Date(),
+      );
+    } catch (error) {
+      logFailure("Gmail connection check", error);
+      outcome = "check-failed";
+    }
+  }
+  redirect(gmailResult(outcome));
+}
+
+export async function disconnectGmailAction(formData: FormData) {
+  const actor = await requireUser();
+
+  let outcome: string;
+  try {
+    outcome = await disconnectGmail(
+      {
+        store: getAdminStore(),
+        google: getGoogleOAuthClient(),
+        cipher: getTokenCipher(),
+      },
+      actor,
+      readField(formData, "identityId"),
+      new Date(),
+    );
+  } catch (error) {
+    logFailure("Gmail disconnect", error);
+    outcome = "failed";
+  }
+  redirect(gmailResult(outcome));
 }

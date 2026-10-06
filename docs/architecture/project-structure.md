@@ -59,8 +59,9 @@ Exists:
   prerendered metadata routes, and `app/not-found.tsx`, the 404 page. See
   [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 - `/admin` and its sub-routes (`app/admin/`), the private mail console:
-  `login`, `setup`, `invite/[token]`, `users`, `senders`, and `approvals`.
-  They are dynamic, `noindex`, and never linked from public pages. See
+  `login`, `setup`, `invite/[token]`, `users`, `senders`, and `approvals`,
+  plus the Route Handler `oauth/google/callback` (Google's OAuth redirect
+  target). They are dynamic, `noindex`, and never linked from public pages. See
   [`mail-console.md`](mail-console.md).
 
 Intended route map (routes not listed above are added when their content
@@ -299,12 +300,14 @@ Both sections sit below the fold and reveal with the motion primitives.
 `components/admin/` holds the console UI. `AdminShell` (console navigation,
 signed-in user, sign out), `PageHeading`, `ProfileSummary`, `OwnerOverview`,
 `UserList`, `InvitationList`, `SenderIdentityList`, `SenderReviewList`,
-`StatusBadge`, `AdminField`, `AccountFields`, `FormStatus`, and
-`SubmitButton` are Server Components. The five forms (`LoginForm`,
-`SetupForm`, `AcceptInvitationForm`, `InviteForm`, `SenderRequestForm`) are
-the only Client Components; each submits a Server Action from
-`lib/admin/actions.ts` with `useActionState`. Row actions in the lists are
-plain `<form>`s bound to Server Actions, so they work without JavaScript.
+`GmailAccountList`, `StatusBadge`, `AdminField`, `AccountFields`,
+`FormStatus`, and `SubmitButton` are Server Components. The five forms
+(`LoginForm`, `SetupForm`, `AcceptInvitationForm`, `InviteForm`,
+`SenderRequestForm`) are Client Components that submit a Server Action from
+`lib/admin/actions.ts` with `useActionState`; the only other one,
+`GmailConnectButton`, shows a pending label with `useFormStatus` while the
+browser is sent to Google. Row actions in the lists are plain `<form>`s
+bound to Server Actions, so they work without JavaScript.
 
 `components/motion/` holds `Reveal`, `Stagger`, `StaggerItem`, and the
 internal `MotionScope`. They are thin Client Components that accept Server
@@ -327,7 +330,7 @@ written.
 | ---------------- | ----------------------------------------------------------------- |
 | `lib/content/`   | MDX/content loading and content utilities                         |
 | `lib/contact/`   | Contact form validation, email rendering, rate limit, delivery    |
-| `lib/admin/`     | Mail console domain, auth, sessions, stores, Server Actions       |
+| `lib/admin/`     | Mail console domain, auth, sessions, stores, Gmail OAuth, actions |
 | `lib/seo/`       | Site URL, metadata, structured data, sitemap, and robots          |
 | `lib/analytics/` | Analytics integration helpers                                     |
 | `lib/site/`      | Site configuration and structured data (experience, current work) |
@@ -564,12 +567,12 @@ the About header's side column.
 `infra/` holds the AWS deployment, described in
 [`deployment.md`](deployment.md):
 
-| File                 | Purpose                                                                                  |
-| -------------------- | ---------------------------------------------------------------------------------------- |
-| `portfolio.yaml`     | Application stack: CloudFront, Lambda, function URL, S3 assets, log group, console table |
-| `bootstrap.yaml`     | One-time stack: GitHub OIDC trust, deploy and CloudFormation roles                       |
-| `package-server.mts` | Assembles `.aws-build/server` (the Lambda package) after `next build`                    |
-| `lambda/run.sh`      | Lambda handler; starts `server.js` behind the Lambda Web Adapter                         |
+| File                 | Purpose                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `portfolio.yaml`     | Application stack: CloudFront, Lambda, function URL, S3 assets, log group, console table, Gmail token KMS key |
+| `bootstrap.yaml`     | One-time stack: GitHub OIDC trust, deploy and CloudFormation roles                                            |
+| `package-server.mts` | Assembles `.aws-build/server` (the Lambda package) after `next build`                                         |
+| `lambda/run.sh`      | Lambda handler; starts `server.js` behind the Lambda Web Adapter                                              |
 
 `.aws-build/` is generated and git-ignored.
 
@@ -592,10 +595,12 @@ Test directories mirror the source tree: a test for
 by the tests that need them. `tests/mdx-components.test.tsx` covers the root
 `mdx-components.tsx`, and `tests/next.config.test.ts` the security headers
 in `next.config.ts` and their CloudFront copy in `infra/portfolio.yaml`.
-`tests/infra/` checks the CloudFormation templates' console table and IAM
-scope. Console tests run the domain modules against the memory store, with
-`tests/helpers/admin.ts` seeding an OWNER and users, and mock the Next.js
-request APIs with `tests/helpers/nextRequest.ts`.
+`tests/infra/` checks the CloudFormation templates' console table, KMS key,
+and IAM scope. Console tests run the domain modules against the memory
+store, with `tests/helpers/admin.ts` seeding an OWNER and users, and mock
+the Next.js request APIs with `tests/helpers/nextRequest.ts`. Gmail tests
+use the fake Google client in `tests/helpers/gmail.ts`; no test calls
+Google or AWS.
 
 ## Imports
 

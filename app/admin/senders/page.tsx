@@ -20,8 +20,8 @@ export default async function SendersPage() {
           <p>
             Ask the owner to approve the Gmail addresses you want to send from.
             Approval only authorizes an address for your account here; it does
-            not connect Gmail, which is a separate step that is not available
-            yet.
+            not connect Gmail. Once an address is approved, connect its Gmail
+            account from the dashboard.
           </p>
         </PageHeading>
 

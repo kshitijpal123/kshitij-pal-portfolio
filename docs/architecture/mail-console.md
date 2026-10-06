@@ -1,12 +1,14 @@
 # Private Mail Console
 
-Status: Milestone 1 of the console (foundation): authentication, users,
-roles, invitations, the five-user limit, the OWNER bootstrap, and sender
-identity approval. Nothing sends email yet.
+Status: Milestone 2 of the console. Milestone 1 (foundation) built
+authentication, users, roles, invitations, the five-user limit, the OWNER
+bootstrap, and sender identity approval. Milestone 2 adds Gmail account
+connection through Google OAuth (see "Gmail connection"). Nothing sends
+email yet.
 
-Approved sender identity does not mean Gmail authorization.
-
-Gmail OAuth + Gmail API are implemented in M2, not M1.
+Approved sender identity does not mean Gmail authorization, and Gmail
+authorization does not mean approval. Sending (a later milestone) needs
+both.
 
 ## Purpose
 
@@ -34,6 +36,7 @@ untouched.
 | ---------------------------------------------- | ----- | ---- |
 | Sign in, see own profile, sign out             | Yes   | Yes  |
 | Request a sender identity, see own requests    | Yes   | Yes  |
+| Connect, check, disconnect own Gmail accounts  | Yes   | Yes  |
 | See all users, invitations, and seat usage     | Yes   | No   |
 | Invite and revoke invitations                  | Yes   | No   |
 | Disable and re-enable USERs                    | Yes   | No   |
@@ -48,13 +51,16 @@ itself, and USER-status changes never apply to the OWNER.
 
 | Route                   | Who                              | Purpose                                               |
 | ----------------------- | -------------------------------- | ----------------------------------------------------- |
-| `/admin`                | Signed in                        | Profile, sender identities, OWNER overview            |
+| `/admin`                | Signed in                        | Profile, identities, Gmail accounts, OWNER overview   |
 | `/admin/login`          | Anyone                           | Sign in (redirects to `/admin` if signed in)          |
 | `/admin/setup`          | Anyone, only while bootstrapping | Create the OWNER; 404 otherwise (signed in: `/admin`) |
 | `/admin/invite/[token]` | Holder of an open invitation     | Choose a name and password                            |
 | `/admin/users`          | OWNER                            | Seats, users, invitations, invite form                |
 | `/admin/senders`        | Signed in                        | Request and track own sender identities               |
 | `/admin/approvals`      | OWNER                            | Review sender identity requests                       |
+
+`/admin/oauth/google/callback` is a Route Handler, not a page: Google
+redirects the browser there after consent (see "Gmail connection").
 
 A signed-out visitor to a protected page is redirected to `/admin/login`; a
 USER on an OWNER page is redirected to `/admin`. Every page renders per
@@ -65,7 +71,9 @@ the edge.
 
 ```
 app/admin/           Routing files only (layout sets noindex)
-components/admin/    Console UI; the five forms are the only Client Components
+  oauth/google/callback/route.ts   Google's OAuth redirect target
+components/admin/    Console UI; the five forms and GmailConnectButton are
+                     the only Client Components
 lib/admin/
   model.ts           Types, limits, seat counting, public projections
   validation.ts      Form parsing and validation (server side)
@@ -79,6 +87,10 @@ lib/admin/
   invitations.ts     Capacity, invite, revoke, accept
   users.ts           User administration
   senderIdentities.ts  Requests, reviews, and the isApprovedSender guard
+  googleOAuth.ts     Google OAuth client: consent URL, token endpoint, revoke
+  tokenCipher.ts     KMS envelope encryption of stored refresh tokens
+  gmailConnections.ts  Connect, callback, refresh, check, disconnect, and
+                     the getGmailAccessToken sending gate
   session.ts         Cookies and requireUser / requireOwner (request scope)
   actions.ts         Server Actions: thin wrappers over the modules above
 ```
@@ -148,17 +160,19 @@ One DynamoDB table, `<stack>-admin` (on-demand, point-in-time recovery,
 deletion protection, retained if the stack is deleted). Single-table
 layout, keyed by `pk` and `sk`:
 
-| `pk`           | `sk`       | Item                                        |
-| -------------- | ---------- | ------------------------------------------- |
-| `USER`         | user ID    | User (including the password hash)          |
-| `USER_EMAIL`   | email      | Unique-email lock                           |
-| `META`         | `OWNER`    | The single-OWNER lock                       |
-| `META`         | `SEATS`    | Version counter for the five-seat limit     |
-| `INVITATION`   | ID         | Invitation (token hash only)                |
-| `SESSION`      | token hash | Session; `expiresAtEpoch` TTL               |
-| `ATTEMPT`      | key        | Failed-attempt window; `expiresAtEpoch` TTL |
-| `SENDER`       | ID         | Sender identity                             |
-| `SENDER_EMAIL` | email      | One active claimant per sender address      |
+| `pk`           | `sk`        | Item                                         |
+| -------------- | ----------- | -------------------------------------------- |
+| `USER`         | user ID     | User (including the password hash)           |
+| `USER_EMAIL`   | email       | Unique-email lock                            |
+| `META`         | `OWNER`     | The single-OWNER lock                        |
+| `META`         | `SEATS`     | Version counter for the five-seat limit      |
+| `INVITATION`   | ID          | Invitation (token hash only)                 |
+| `SESSION`      | token hash  | Session; `expiresAtEpoch` TTL                |
+| `ATTEMPT`      | key         | Failed-attempt window; `expiresAtEpoch` TTL  |
+| `SENDER`       | ID          | Sender identity                              |
+| `SENDER_EMAIL` | email       | One active claimant per sender address       |
+| `OAUTH_STATE`  | state hash  | Pending Google consent; `expiresAtEpoch` TTL |
+| `GMAIL`        | identity ID | Gmail connection (encrypted credential)      |
 
 Each collection is one partition, which is ample for five users and keeps
 listing a `Query` (no `Scan`). Reads that decide authorization are strongly
@@ -277,21 +291,262 @@ identity has provider `GMAIL`.
   pass.
 
 Approved sender identity does not mean Gmail authorization. Approval is the
-OWNER's internal permission only. M2 must additionally obtain Google OAuth
-consent for the same Google account before anything is sent, and must
-refuse to send unless both hold.
+OWNER's internal permission only; see "Approval and authorization".
 
-## M2 boundary
+## Gmail connection
 
-Gmail OAuth + Gmail API are implemented in M2, not M1. Not built, and not
-stubbed: Google OAuth, Gmail tokens or their storage, sending, contacts,
-templates, compose, scheduling, provider credentials, and public sign-up.
+A user connects the Gmail account behind one of their own APPROVED sender
+identities by granting the console Google's `gmail.send` permission. The
+console keeps an encrypted refresh token for it. Nothing is sent in M2;
+the connection exists so a later milestone can send.
+
+### Approval and authorization
+
+|            | Sender identity approval         | Gmail authorization                      |
+| ---------- | -------------------------------- | ---------------------------------------- |
+| Decided by | The OWNER, in `/admin/approvals` | The address's owner, on Google's consent |
+| Proves     | The console allows this address  | Google lets the console send as it       |
+| Stored as  | `SENDER` item, status `APPROVED` | `GMAIL` item, status `CONNECTED`         |
+| Revoked by | OWNER disables the identity      | Disconnect, or revocation at Google      |
+
+Neither implies the other:
+
+- Connecting requires an identity that belongs to the signed-in user and is
+  APPROVED (`isApprovedSender`), checked both when the flow starts and
+  again in the callback. A USER cannot connect a REQUESTED, REJECTED, or
+  DISABLED identity, or anyone else's.
+- Approving an identity creates no connection. The OWNER is a user like any
+  other here: their own identities need their own Google consent.
+- `getGmailAccessToken(deps, actor, email, now)` in
+  `lib/admin/gmailConnections.ts` is the gate future sending must call. It
+  returns an access token only when the address is APPROVED for the actor
+  **and** its connection is CONNECTED and Google still accepts it.
+  Disabling an identity therefore stops its use immediately, even though the
+  connection record stays.
+- The dashboard shows both statuses separately for each address, and says
+  whether the address is usable.
+
+### Scopes
+
+`openid email https://www.googleapis.com/auth/gmail.send`, and nothing
+else. `gmail.send` is the only Gmail permission; the console never reads,
+lists, or modifies mail. `openid email` are requested for one concrete
+reason: the console must confirm that the Google account authorized is the
+approved address, and `gmail.send` alone cannot read the account's own
+address (Gmail's `users.getProfile` needs a read or compose scope). With
+`openid email`, the token response includes an ID token carrying the
+account's verified address and stable ID (`sub`). `profile` is not
+requested, and neither is `include_granted_scopes`, so no earlier grant is
+merged in.
+
+### Flow
+
+```
+Dashboard: "Connect Gmail" (Server Action, form carries only identityId)
+  → own APPROVED identity? → store OAUTH_STATE (hashed state, user, session
+    hash, identity, PKCE verifier, nonce; 10-minute expiry)
+  → 303 to accounts.google.com (state, S256 code challenge, nonce,
+    login_hint, access_type=offline, prompt=consent)
+Google consent → 302 to /admin/oauth/google/callback?state&code
+  → consume state → check expiry, session, user → identity still own and
+    APPROVED → exchange code (client secret + PKCE verifier, server side)
+  → verify ID token (Google's signature and claims)
+  → verified address == identity address?
+    → gmail.send granted? → refresh token present?
+  → encrypt refresh token (KMS) → store GMAIL item, CONNECTED
+  → 303 to /admin?gmail=connected
+```
+
+The callback is `/admin/oauth/google/callback`. In production its full URI
+is `https://kshitijpal.in/admin/oauth/google/callback`, built by the
+template from `SITE_URL` (see "Configuration"). Every callback response is
+a `303` with a relative `Location` (`/admin?gmail=<result>`, or
+`/admin/login` when signed out), `Cache-Control: private, no-store`, and
+`Referrer-Policy: no-referrer`. The result code maps to a fixed message on
+the dashboard; unknown codes show nothing, and nothing from the query is
+echoed.
+
+Connecting an address again (Reconnect) runs the same flow and replaces
+the stored credential, keeping the connection's ID and creation date.
+
+### State protection
+
+- `state`, the PKCE verifier, and the nonce are each 32 random bytes
+  (base64url). Only the state's SHA-256 hash is stored, so the table cannot
+  be replayed into a callback.
+- The state is bound to the user and to the SHA-256 of their session token.
+  The callback refuses it unless the request's session is the same one,
+  so a link started in one session, or by another user, does nothing. The
+  callback's query carries no user or identity ID; both come from the stored
+  state, and the identity is re-checked against the session's user.
+- It expires after 10 minutes (`oauthStateTtlMs`), and the table's TTL
+  removes leftovers.
+- It is single use: the callback deletes it atomically (`DeleteItem` with
+  `ReturnValues: ALL_OLD`) before any other check, so it is gone after
+  success, failure, denial, or expiry alike, and two concurrent callbacks
+  cannot both use it.
+- PKCE (S256) means an intercepted code is useless without the verifier,
+  which never leaves the server. The nonce ties the ID token to this
+  attempt.
+
+### Identity check
+
+The ID token is verified cryptographically, not trusted for having arrived
+over TLS. `verifyGoogleIdToken` in `lib/admin/googleOAuth.ts` uses
+[`jose`](https://github.com/panva/jose) and requires:
+
+- an **RS256 signature** by a key in Google's published key set
+  (`https://www.googleapis.com/oauth2/v3/certs`), selected by the token's
+  `kid`. Other algorithms, including `none` and HMAC, are refused. The key
+  set is fetched on first use, cached per Lambda instance (10 minutes), and
+  refetched when an unknown `kid` appears, so Google's key rotation needs
+  nothing from us. If the keys cannot be loaded, the token is refused;
+- `iss` = `https://accounts.google.com` or `accounts.google.com`;
+- `aud` = the OAuth client ID, and `azp` = the client ID when present (and
+  required when there are several audiences);
+- `exp` in the future and `iat` in the past, no older than 5 minutes (the
+  token is minted by the code exchange in the same request), each with 60
+  seconds of clock tolerance;
+- `nonce` = the one stored with this attempt's state;
+- `sub` present, `email` a well-formed address, and `email_verified` true.
+
+Any failure gives the `failed` result and stores nothing; the reason is not
+shown or logged. The verified email, normalized, must then equal the
+identity's address. If it differs, the result is `email-mismatch` with a clear
+message, nothing is stored, and the tokens are dropped. They are not
+revoked: revoking a token ends the user's whole grant to the app, including
+a valid connection the same Google account may hold for another identity.
+
+### Encryption and storage
+
+Refresh tokens are envelope encrypted (`lib/admin/tokenCipher.ts`):
+
+1. KMS `GenerateDataKey` (AES-256) on the `GmailTokenKey` customer managed
+   key returns a plaintext data key and its encrypted copy.
+2. The token is encrypted with AES-256-GCM under the data key (random
+   96-bit IV); the plaintext data key is zeroed straight after.
+3. The item stores the encrypted data key, IV, ciphertext, and
+   authentication tag (`credentials`, `scheme: "kms"`).
+
+The encryption context `{purpose: "gmail-oauth-refresh-token", userId,
+senderIdentityId}` is bound in KMS and used as the GCM additional data, so
+a credential copied to another user's or identity's item cannot be
+decrypted. The key policy only lets the function use the key with that
+`purpose`. Decrypting calls KMS `Decrypt` with the same context. The
+decision is recorded in
+[ADR 0004](../adr/0004-gmail-oauth-kms-envelope-encryption.md).
+
+Access tokens are never stored: each is fetched on demand, used, and
+discarded. The client secret and every token stay on the server. Pages
+receive `PublicGmailConnection`, a projection without `credentials`;
+Server Actions return only result codes; nothing goes into cookies, URLs,
+browser storage, or client state.
+
+Without `GMAIL_TOKEN_KMS_KEY_ID`, local development uses an in-process
+AES-256-GCM key (scheme `local`, with a warning), lost on restart like the
+memory store. In production a missing key ID fails closed: connecting is
+reported as not configured.
+
+### Lifecycle
+
+| Status            | Meaning                           | Credential | Usable for sending       |
+| ----------------- | --------------------------------- | ---------- | ------------------------ |
+| (no item)         | Never connected ("Not connected") | none       | No                       |
+| `CONNECTED`       | Google authorized this address    | encrypted  | Only while also APPROVED |
+| `REAUTH_REQUIRED` | Google refused the stored token   | deleted    | No; Reconnect            |
+| `DISCONNECTED`    | The user disconnected             | deleted    | No; Connect again        |
+
+"Connecting…" is only the button's pending state while the browser goes to
+Google; nothing is stored as connecting except the short-lived state.
+
+**Refresh, on demand only.** There is no background job, poller, or timer.
+A refresh happens when something needs an access token
+(`getGmailAccessToken`) or the user presses "Check connection". The
+outcome:
+
+- Success: `lastValidatedAt` is updated; a rotated refresh token is
+  re-encrypted and stored.
+- `invalid_grant` (revoked, expired, or the password changed), a response
+  without `gmail.send`, or a credential that cannot be decrypted: status
+  becomes `REAUTH_REQUIRED` and the credential is deleted. With nothing left
+  to try, there is no retry; only Reconnect restores it.
+- Google unreachable or failing (network error, timeout after 8 seconds,
+  5xx): nothing changes, and the user is told to try later.
+
+**Disconnect** revokes the refresh token at Google
+(`oauth2.googleapis.com/revoke`), then deletes the credential and marks the
+connection `DISCONNECTED`. The local deletion always happens: if Google
+cannot be reached or confirm, the message says so and points to the
+Google Account's security settings. Revoking ends the app's grant for that
+Google account as a whole. A `REAUTH_REQUIRED` connection can also be
+disconnected.
+
+### Configuration
+
+| Name                        | Kind                | Source in production                                    |
+| --------------------------- | ------------------- | ------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`          | Runtime             | GitHub environment variable → template parameter        |
+| `GOOGLE_CLIENT_SECRET`      | Runtime, **secret** | GitHub environment secret → `NoEcho` template parameter |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Runtime             | Template: `${SiteUrl}/admin/oauth/google/callback`      |
+| `GMAIL_TOKEN_KMS_KEY_ID`    | Runtime             | Template: the `GmailTokenKey` ARN                       |
+
+The redirect URI must be `https` (or `http` on `localhost`), with exactly
+the callback path; anything else turns the feature off. It cannot be derived
+from the request, because behind CloudFront the request's `Host` is the
+function URL. Until the client ID, secret, and redirect URI are all set,
+the dashboard reports "Gmail connection is not configured on this server",
+and the rest of the console works as before. Locally, set them in a
+git-ignored `.env.local` with the redirect URI
+`http://localhost:3000/admin/oauth/google/callback`.
+
+### Google Cloud Console (manual)
+
+The repository cannot configure Google. In the Google Cloud project that
+owns the OAuth client:
+
+1. **APIs & Services → Library**: enable the **Gmail API**.
+2. **Google Auth Platform → Branding** (the OAuth consent screen): set the
+   app name, support email, and developer contact.
+3. **Audience**: user type **External**. While the publishing status is
+   **Testing**, add each console member's Google account as a **test
+   user** (at most five people use the console).
+4. **Data Access**: add the scopes `openid`,
+   `.../auth/userinfo.email`, and `.../auth/gmail.send`. Add nothing
+   else.
+5. **Clients → Create client**: type **Web application**. Authorized
+   redirect URIs:
+   - `https://kshitijpal.in/admin/oauth/google/callback` (production)
+   - `http://localhost:3000/admin/oauth/google/callback` (local
+     development, optional; a separate client works too)
+
+   No JavaScript origins are needed: the browser never calls Google's APIs.
+
+6. Copy the client ID into the GitHub `production` environment variable
+   `GOOGLE_CLIENT_ID` and the client secret into the environment secret
+   `GOOGLE_CLIENT_SECRET`. Never commit either.
+
+`gmail.send` is a sensitive scope. In Testing status Google shows an
+"unverified app" screen to test users and **expires refresh tokens after 7
+days**, so connections then need Reconnect weekly. Publishing the app
+("In production") removes the expiry, but Google requires verification for
+sensitive scopes before an app can be used by other people; see Google's
+OAuth app verification documentation for whether this app needs it.
+
+### Not built in M2
+
+Compose, sending, templates, contacts, bulk mail, scheduling, recurring
+sends, inbox access or sync, other providers, background workers, public
+sign-up, billing, multi-factor authentication, and password reset.
 
 ## Logging
 
-Server Actions log only `[admin] <operation> failed (<error name>).` on an
-unexpected error. Passwords, password hashes, session tokens, invitation
-tokens, the bootstrap token, and email addresses are never logged.
+Server Actions and the OAuth callback log only
+`[admin] <operation> failed (<error name>).` on an unexpected error.
+Passwords, password hashes, session tokens, invitation tokens, the
+bootstrap token, OAuth state, codes, access and refresh tokens, ID tokens,
+the client secret, and email addresses are never logged. Google errors
+carry a fixed message (`Google OAuth request failed (<kind>).`) and never a
+response body.
 
 ## Known limitations
 
@@ -308,3 +563,18 @@ tokens, the bootstrap token, and email addresses are never logged.
   `/admin` (see ADR 0002). Session cookies are scoped to `kshitijpal.in`, so
   they are never sent there, and the same authentication applies.
 - **Local data is ephemeral** with the memory store.
+- **7-day Gmail connections while the Google app is in Testing.** Google
+  expires its refresh tokens; the next refresh marks the connection
+  REAUTH_REQUIRED.
+- **Connection status is only as fresh as its last check.** With no
+  background refresh, a connection revoked at Google shows CONNECTED until
+  something refreshes it (Check connection, or a future send).
+- **A disabled identity keeps its connection record**, unusable because
+  approval is checked on every use. Re-approval needs a new request, which
+  creates a new identity and so a new connection.
+- **Disconnect revokes the whole Google grant** for that Google account,
+  which matters only if one Google account were connected for two
+  identities.
+- **Last write wins** on a connection: two simultaneous reconnects or
+  refreshes of the same address store whichever finishes last, which is
+  still a valid credential.

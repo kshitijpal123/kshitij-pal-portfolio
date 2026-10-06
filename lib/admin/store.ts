@@ -1,5 +1,7 @@
 import type {
+  GmailConnection,
   Invitation,
+  OAuthState,
   SenderIdentity,
   SenderIdentityStatus,
   Session,
@@ -88,4 +90,17 @@ export type AdminStore = {
   listSenderIdentitiesForUser(userId: string): Promise<SenderIdentity[]>;
   /** `false` when the identity does not exist or is not in `from`. */
   reviewSenderIdentity(id: string, review: SenderReview): Promise<boolean>;
+
+  createOAuthState(state: OAuthState): Promise<void>;
+  /**
+   * Deletes and returns a pending authorization in one step, so a state
+   * value can be redeemed at most once. Expiry is the caller's check.
+   */
+  takeOAuthState(stateHash: string): Promise<OAuthState | null>;
+
+  /** At most one connection per sender identity. */
+  getGmailConnection(senderIdentityId: string): Promise<GmailConnection | null>;
+  listGmailConnectionsForUser(userId: string): Promise<GmailConnection[]>;
+  /** Creates or replaces the connection for its sender identity. */
+  saveGmailConnection(connection: GmailConnection): Promise<void>;
 };

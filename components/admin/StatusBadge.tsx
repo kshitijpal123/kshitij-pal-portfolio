@@ -4,17 +4,25 @@ const variants: Record<string, BadgeVariant> = {
   ACTIVE: "accent",
   APPROVED: "accent",
   ACCEPTED: "accent",
+  CONNECTED: "accent",
   PENDING: "default",
   REQUESTED: "default",
+  REAUTH_REQUIRED: "default",
   OWNER: "default",
   USER: "default",
   DISABLED: "muted",
   REJECTED: "muted",
   EXPIRED: "muted",
   REVOKED: "muted",
+  DISCONNECTED: "muted",
+  NOT_CONNECTED: "muted",
 };
 
 /** A role or status as text; the variant only reinforces it. */
 export function StatusBadge({ value }: { value: string }) {
-  return <Badge variant={variants[value] ?? "default"}>{value}</Badge>;
+  return (
+    <Badge variant={variants[value] ?? "default"}>
+      {value.replaceAll("_", " ")}
+    </Badge>
+  );
 }

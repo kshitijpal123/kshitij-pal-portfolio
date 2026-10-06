@@ -145,3 +145,89 @@ export type SenderIdentity = {
   reviewedBy: string | null;
   rejectionReason: string | null;
 };
+
+export const oauthStateTtlMs = 10 * 60 * 1000;
+
+/**
+ * A pending Google authorization, keyed by the SHA-256 of the `state` value
+ * sent to Google. It is bound to the user and session that started it and is
+ * deleted when the callback reads it, so it works once.
+ */
+export type OAuthState = {
+  stateHash: string;
+  userId: string;
+  /** SHA-256 of the session cookie that started the flow. */
+  sessionHash: string;
+  senderIdentityId: string;
+  /** PKCE verifier; only useful together with Google's one-time code. */
+  codeVerifier: string;
+  nonce: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/**
+ * Envelope encryption: `ciphertext` is AES-256-GCM under a one-off data key,
+ * and `encryptedDataKey` is that key encrypted by KMS (or, in local
+ * development only, by an in-process key).
+ */
+export type EncryptedSecret = {
+  version: 1;
+  scheme: "kms" | "local";
+  encryptedDataKey: string;
+  iv: string;
+  ciphertext: string;
+  authTag: string;
+};
+
+/**
+ * Whether Google still authorizes sending. Separate from, and never implied
+ * by, the sender identity's APPROVED status. "Not connected" is the absence
+ * of a connection.
+ */
+export type GmailConnectionStatus =
+  "CONNECTED" | "REAUTH_REQUIRED" | "DISCONNECTED";
+
+/** One Google authorization for one of the user's sender identities. */
+export type GmailConnection = {
+  id: string;
+  userId: string;
+  senderIdentityId: string;
+  provider: SenderProvider;
+  /** The Google account's verified address; equals the identity's email. */
+  email: string;
+  /** Google's stable account ID (the ID token's `sub`). */
+  providerAccountId: string;
+  status: GmailConnectionStatus;
+  /** The encrypted refresh token; `null` once disconnected or unusable. */
+  credentials: EncryptedSecret | null;
+  scopes: string[];
+  createdAt: string;
+  updatedAt: string;
+  connectedAt: string;
+  lastValidatedAt: string | null;
+  disconnectedAt: string | null;
+};
+
+/** Everything about a connection that may leave the server. */
+export type PublicGmailConnection = Omit<GmailConnection, "credentials">;
+
+export function toPublicGmailConnection(
+  connection: GmailConnection,
+): PublicGmailConnection {
+  return {
+    id: connection.id,
+    userId: connection.userId,
+    senderIdentityId: connection.senderIdentityId,
+    provider: connection.provider,
+    email: connection.email,
+    providerAccountId: connection.providerAccountId,
+    status: connection.status,
+    scopes: connection.scopes,
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
+    connectedAt: connection.connectedAt,
+    lastValidatedAt: connection.lastValidatedAt,
+    disconnectedAt: connection.disconnectedAt,
+  };
+}

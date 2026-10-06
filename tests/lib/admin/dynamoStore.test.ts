@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {
+  DeleteCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -8,7 +9,12 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { describe, expect, it, vi } from "vitest";
 import { createDynamoStore } from "@/lib/admin/dynamoStore";
-import type { Invitation, User } from "@/lib/admin/model";
+import type {
+  GmailConnection,
+  Invitation,
+  OAuthState,
+  User,
+} from "@/lib/admin/model";
 
 type Command = { input: Record<string, unknown> };
 
@@ -56,6 +62,41 @@ const invitation: Invitation = {
   acceptedAt: null,
   revokedAt: null,
   invitedBy: "owner",
+};
+
+const oauthState: OAuthState = {
+  stateHash: "state-hash",
+  userId: "u1",
+  sessionHash: "session-hash",
+  senderIdentityId: "s1",
+  codeVerifier: "verifier",
+  nonce: "nonce",
+  createdAt: now.toISOString(),
+  expiresAt: "2026-10-06T09:10:00.000Z",
+};
+
+const connection: GmailConnection = {
+  id: "g1",
+  userId: "u1",
+  senderIdentityId: "s1",
+  provider: "GMAIL",
+  email: "friend@gmail.com",
+  providerAccountId: "sub",
+  status: "CONNECTED",
+  credentials: {
+    version: 1,
+    scheme: "kms",
+    encryptedDataKey: "a2V5",
+    iv: "aXY=",
+    ciphertext: "Y3Q=",
+    authTag: "dGFn",
+  },
+  scopes: ["https://www.googleapis.com/auth/gmail.send"],
+  createdAt: now.toISOString(),
+  updatedAt: now.toISOString(),
+  connectedAt: now.toISOString(),
+  lastValidatedAt: now.toISOString(),
+  disconnectedAt: null,
 };
 
 describe("createDynamoStore", () => {
@@ -287,6 +328,88 @@ describe("createDynamoStore", () => {
     expect(release.Delete).toMatchObject({
       Key: { pk: "SENDER_EMAIL", sk: "friend@gmail.com" },
       ExpressionAttributeValues: { ":id": "s1" },
+    });
+  });
+
+  it("stores OAuth states once, with a TTL, under their hash", async () => {
+    const fake = client(() => ({}));
+    const store = createDynamoStore("table", fake);
+    await store.createOAuthState(oauthState);
+
+    const [command] = fake.calls();
+    expect(command).toBeInstanceOf(PutCommand);
+    expect(command.input).toMatchObject({
+      Item: {
+        pk: "OAUTH_STATE",
+        sk: "state-hash",
+        userId: "u1",
+        expiresAtEpoch: Date.parse(oauthState.expiresAt) / 1000,
+      },
+      ConditionExpression: "attribute_not_exists(pk)",
+    });
+  });
+
+  it("consumes an OAuth state with a single delete", async () => {
+    const fake = client(() => ({
+      Attributes: {
+        pk: "OAUTH_STATE",
+        sk: "state-hash",
+        expiresAtEpoch: 1,
+        ...oauthState,
+      },
+    }));
+    const store = createDynamoStore("table", fake);
+
+    expect(await store.takeOAuthState("state-hash")).toEqual(oauthState);
+    const [command] = fake.calls();
+    expect(command).toBeInstanceOf(DeleteCommand);
+    expect(command.input).toMatchObject({
+      Key: { pk: "OAUTH_STATE", sk: "state-hash" },
+      ReturnValues: "ALL_OLD",
+    });
+
+    const empty = createDynamoStore(
+      "table",
+      client(() => ({})),
+    );
+    expect(await empty.takeOAuthState("used")).toBeNull();
+  });
+
+  it("keys Gmail connections by sender identity and lists them per user", async () => {
+    const fake = client((command) =>
+      command instanceof QueryCommand
+        ? { Items: [{ pk: "GMAIL", sk: "s1", ...connection }] }
+        : {},
+    );
+    const store = createDynamoStore("table", fake);
+
+    await store.saveGmailConnection(connection);
+    expect(await store.listGmailConnectionsForUser("u1")).toEqual([connection]);
+
+    const [put, query] = fake.calls();
+    expect(put).toBeInstanceOf(PutCommand);
+    expect(put.input.Item).toMatchObject({
+      pk: "GMAIL",
+      sk: "s1",
+      credentials: connection.credentials,
+    });
+    expect(query.input).toMatchObject({
+      KeyConditionExpression: "pk = :pk",
+      FilterExpression: "userId = :userId",
+      ExpressionAttributeValues: { ":pk": "GMAIL", ":userId": "u1" },
+      ConsistentRead: true,
+    });
+  });
+
+  it("reads a Gmail connection strongly consistently", async () => {
+    const fake = client(() => ({
+      Item: { pk: "GMAIL", sk: "s1", ...connection },
+    }));
+    const store = createDynamoStore("table", fake);
+    expect(await store.getGmailConnection("s1")).toEqual(connection);
+    expect(fake.calls()[0].input).toMatchObject({
+      Key: { pk: "GMAIL", sk: "s1" },
+      ConsistentRead: true,
     });
   });
 

@@ -39,6 +39,7 @@ Why this architecture: [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 | S3              | `portfolio-production-artifacts-<acct>-…`     | Lambda code packages uploaded by `aws cloudformation package` |
 | CloudWatch Logs | `/aws/lambda/portfolio-production-server`     | Server logs, 30-day retention                                 |
 | DynamoDB        | `portfolio-production-admin`                  | Private mail console data (see `mail-console.md`)             |
+| KMS             | `GmailTokenKey` (customer managed key)        | Envelope encryption of stored Gmail refresh tokens            |
 | IAM             | Roles and a permissions boundary              | OIDC deploy role, CloudFormation role, Lambda role            |
 | CloudFormation  | `portfolio-bootstrap`, `portfolio-production` | Everything above, as code                                     |
 
@@ -153,6 +154,10 @@ Revisit it when analytics or monitoring adds third-party scripts.
 | `CONTACT_FROM_EMAIL`                                                         | Runtime             | GitHub environment variable                         | Lambda environment → `/api/contact`    |
 | `ADMIN_BOOTSTRAP_TOKEN`                                                      | Runtime, **secret** | GitHub environment secret, only while bootstrapping | Lambda environment → `/admin/setup`    |
 | `ADMIN_TABLE_NAME`                                                           | Runtime             | Set by the template                                 | Lambda environment → `/admin`          |
+| `GOOGLE_CLIENT_ID`                                                           | Runtime             | GitHub environment variable                         | Lambda environment → Gmail connection  |
+| `GOOGLE_CLIENT_SECRET`                                                       | Runtime, **secret** | GitHub environment secret                           | Lambda environment → Gmail connection  |
+| `GOOGLE_OAUTH_REDIRECT_URI`                                                  | Runtime             | Set by the template from `SITE_URL`                 | Lambda environment → Gmail connection  |
+| `GMAIL_TOKEN_KMS_KEY_ID`                                                     | Runtime             | Set by the template (the `GmailTokenKey` ARN)       | Lambda environment → Gmail connection  |
 | `AWS_REGION`                                                                 | Deployment          | GitHub environment variable                         | Workflow                               |
 | `AWS_DEPLOY_ROLE_ARN`, `AWS_CLOUDFORMATION_ROLE_ARN`, `AWS_ARTIFACTS_BUCKET` | Deployment          | GitHub environment variables                        | Workflow                               |
 
@@ -172,6 +177,13 @@ Revisit it when analytics or monitoring adds third-party scripts.
   the secret and deploy again (an unset secret deploys as an empty value,
   which turns bootstrap off). See "OWNER bootstrap" in
   [`mail-console.md`](mail-console.md).
+- `GOOGLE_CLIENT_SECRET` takes the same `NoEcho` path. The deploy also
+  passes `SITE_URL` to the template as `SiteUrl`, which builds
+  `GOOGLE_OAUTH_REDIRECT_URI` (`https://kshitijpal.in/admin/oauth/google/callback`);
+  `SITE_URL` itself is still not a Lambda variable. Gmail refresh tokens
+  are not environment values: they are encrypted with KMS and stored in
+  the console table (see "Gmail connection" in
+  [`mail-console.md`](mail-console.md)).
 - None of these values are `NEXT_PUBLIC_`, so none reach the browser.
 - Nothing secret is in the repository, `.env.example`, the templates, or
   this document. `.env*` files are git-ignored and stripped from the Lambda
@@ -185,11 +197,22 @@ Revisit it when analytics or monitoring adds third-party scripts.
   permissions boundary (`portfolio-production-lambda-boundary`, created by the
   bootstrap stack) caps it at that, whatever the application template
   requests.
+- **Gmail token key.** The role itself has no KMS permission. The
+  `GmailTokenKey` key policy grants the function role exactly
+  `kms:GenerateDataKey` and `kms:Decrypt`, and only with the encryption
+  context `purpose = gmail-oauth-refresh-token`; the boundary allows the
+  same two actions under the same condition. The account root keeps the
+  administrative actions (so the key cannot become unmanageable) but no
+  encrypt or decrypt actions. The key has automatic yearly rotation and
+  `DeletionPolicy: Retain`, since deleting it would make every stored token
+  unreadable.
 - **CloudFormation execution role** (`cfn-exec-portfolio-production`). It
   manages only the application stack's resources: functions, roles, and log
   groups named `portfolio-production-*`, tables named
   `portfolio-production-*` (create, update, delete, TTL, backups, tags), and
-  the assets bucket. It can create
+  the assets bucket, plus creating and administering KMS keys in the
+  account (key policy, rotation, tags, scheduled deletion; never encrypt or
+  decrypt). It can create
   roles only with the boundary attached, and pass them only to Lambda.
   CloudFront policy actions use `*` where CloudFront has no resource-level
   permissions.
@@ -339,6 +362,32 @@ aws cloudformation deploy \
 bootstrap" in [`mail-console.md`](mail-console.md) to create the OWNER. The
 `Distribution` resource is unchanged, so the custom domain is unaffected.
 
+### First deploy of Gmail connection
+
+The Gmail connection adds a KMS key and KMS permissions in both templates.
+As with the console, **update the bootstrap stack first** (the same
+`aws cloudformation deploy` command as above); otherwise the CloudFormation
+role cannot create the key and the deploy rolls back. Then:
+
+1. Complete "Google Cloud Console (manual)" in
+   [`mail-console.md`](mail-console.md), registering the redirect URI
+   `https://kshitijpal.in/admin/oauth/google/callback`.
+2. Add the `production` environment variable `GOOGLE_CLIENT_ID` and the
+   secret `GOOGLE_CLIENT_SECRET`
+   (`gh variable set GOOGLE_CLIENT_ID --env production`,
+   `gh secret set GOOGLE_CLIENT_SECRET --env production`).
+3. Push. The deploy creates the key and passes the values to Lambda.
+
+Deploying before step 2 is safe: the client values are empty, and the
+dashboard reports Gmail connection as not configured. The `Distribution`
+resource is unchanged.
+
+### Rotating the Google client secret
+
+Create a new secret on the OAuth client in Google Cloud, update the
+`GOOGLE_CLIENT_SECRET` secret, re-run the latest workflow, then delete the
+old secret in Google Cloud. Stored refresh tokens stay valid.
+
 ### Rotating the Resend key
 
 Update the `RESEND_API_KEY` secret, then re-run the latest workflow. The
@@ -424,7 +473,10 @@ small S3 storage (static assets and 30 days of packages), CloudWatch Logs
 ingestion with 30-day retention, and invalidations, which are within the
 free allowance at one per deploy. The console table is on-demand with no
 provisioned capacity, so at five users its requests, storage, and
-point-in-time recovery are negligible. Check current AWS pricing for figures.
+point-in-time recovery are negligible. The Gmail token key is the one
+fixed monthly charge (a customer managed KMS key is billed per month, plus
+per request beyond the free tier; requests happen only on connect, refresh,
+and disconnect). Check current AWS pricing for figures.
 A budget alarm is worth adding in the AWS Billing console. It is not in
 the templates.
 

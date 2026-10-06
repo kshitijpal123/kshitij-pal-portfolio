@@ -1,7 +1,9 @@
 import {
   countUsedSeats,
   effectiveInvitationStatus,
+  type GmailConnection,
   type Invitation,
+  type OAuthState,
   type SenderIdentity,
   type Session,
   type User,
@@ -23,6 +25,8 @@ export function createMemoryStore(): AdminStore {
   const sessions = new Map<string, Session>();
   const failures = new Map<string, { count: number; windowStart: number }>();
   const senders = new Map<string, SenderIdentity>();
+  const oauthStates = new Map<string, OAuthState>();
+  const gmailConnections = new Map<string, GmailConnection>();
 
   const copy = <T>(value: T): T => structuredClone(value);
   const findUserByEmail = (email: string) =>
@@ -193,6 +197,31 @@ export function createMemoryStore(): AdminStore {
       identity.reviewedBy = review.reviewedBy;
       identity.rejectionReason = review.rejectionReason;
       return true;
+    },
+
+    async createOAuthState(state) {
+      oauthStates.set(state.stateHash, copy(state));
+    },
+
+    async takeOAuthState(stateHash) {
+      const state = oauthStates.get(stateHash);
+      oauthStates.delete(stateHash);
+      return state ? copy(state) : null;
+    },
+
+    async getGmailConnection(senderIdentityId) {
+      const connection = gmailConnections.get(senderIdentityId);
+      return connection ? copy(connection) : null;
+    },
+
+    async listGmailConnectionsForUser(userId) {
+      return [...gmailConnections.values()]
+        .filter((connection) => connection.userId === userId)
+        .map(copy);
+    },
+
+    async saveGmailConnection(connection) {
+      gmailConnections.set(connection.senderIdentityId, copy(connection));
     },
   };
 }

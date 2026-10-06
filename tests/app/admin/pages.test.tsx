@@ -10,9 +10,11 @@ import SetupPage from "@/app/admin/setup/page";
 import UsersPage from "@/app/admin/users/page";
 import { createInvitation } from "@/lib/admin/invitations";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
+import type { GmailConnection } from "@/lib/admin/model";
 import { requestSenderIdentity } from "@/lib/admin/senderIdentities";
 import type { AdminStore } from "@/lib/admin/store";
 import { now, seedOwner, seedUser, setupToken } from "@/tests/helpers/admin";
+import { seedApprovedIdentity } from "@/tests/helpers/gmail";
 import { NavigationSignal } from "@/tests/helpers/nextRequest";
 
 const next = await vi.hoisted(async () => {
@@ -45,6 +47,10 @@ async function navigation(promise: Promise<unknown>) {
   return (error as NavigationSignal).to;
 }
 
+function dashboardProps(query: Record<string, string> = {}) {
+  return { params: Promise.resolve({}), searchParams: Promise.resolve(query) };
+}
+
 function tokenParams(token: string) {
   return {
     params: Promise.resolve({ token }),
@@ -70,7 +76,12 @@ describe("admin layout", () => {
 describe("access control", () => {
   it("sends signed-out visitors to the login page", async () => {
     next.store = (await seedOwner()).store;
-    for (const page of [DashboardPage, UsersPage, SendersPage, ApprovalsPage]) {
+    for (const page of [
+      () => DashboardPage(dashboardProps()),
+      UsersPage,
+      SendersPage,
+      ApprovalsPage,
+    ]) {
       expect(await navigation(page())).toBe("/admin/login");
     }
   });
@@ -124,7 +135,7 @@ describe("dashboard", () => {
     );
     next.store = store;
     signIn(token);
-    render(await DashboardPage());
+    render(await DashboardPage(dashboardProps()));
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Welcome, Friend",
@@ -157,7 +168,7 @@ describe("dashboard", () => {
     await requestSenderIdentity(store, user, "friend@gmail.com", now);
     next.store = store;
     signIn(ownerToken);
-    render(await DashboardPage());
+    render(await DashboardPage(dashboardProps()));
 
     const overview = within(
       screen.getByRole("region", { name: "Administration" }),
@@ -175,6 +186,164 @@ describe("dashboard", () => {
       "href",
       "/admin/users",
     );
+  });
+});
+
+describe("dashboard Gmail accounts", () => {
+  async function setupAlice() {
+    const { store, owner } = await seedOwner();
+    const alice = await seedUser(store, owner, "alice@example.com", "Alice");
+    const bob = await seedUser(store, owner, "bob@example.com", "Bob");
+    const identity = await seedApprovedIdentity(
+      store,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    next.store = store;
+    signIn(alice.token);
+    return { store, owner, alice, bob, identity };
+  }
+
+  function connection(
+    userId: string,
+    senderIdentityId: string,
+    email: string,
+    status: GmailConnection["status"] = "CONNECTED",
+  ): GmailConnection {
+    return {
+      id: `g-${senderIdentityId}`,
+      userId,
+      senderIdentityId,
+      provider: "GMAIL",
+      email,
+      providerAccountId: "sub",
+      status,
+      credentials:
+        status === "CONNECTED"
+          ? {
+              version: 1,
+              scheme: "kms",
+              encryptedDataKey: "ENCRYPTED-DATA-KEY",
+              iv: "IV-VALUE",
+              ciphertext: "CIPHERTEXT-VALUE",
+              authTag: "AUTH-TAG",
+            }
+          : null,
+      scopes: ["https://www.googleapis.com/auth/gmail.send"],
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      connectedAt: now.toISOString(),
+      lastValidatedAt: now.toISOString(),
+      disconnectedAt: null,
+    };
+  }
+
+  it("shows an approved but unconnected address with a Connect action", async () => {
+    await setupAlice();
+    render(await DashboardPage(dashboardProps()));
+
+    const section = within(
+      screen.getByRole("region", { name: "Gmail accounts" }),
+    );
+    expect(
+      section.getByText("alice@gmail.com", { selector: "p" }),
+    ).toBeInTheDocument();
+    expect(section.getByText("APPROVED")).toBeInTheDocument();
+    expect(section.getByText("NOT CONNECTED")).toBeInTheDocument();
+    expect(
+      section.getByText(
+        "Not usable yet: approved, but Gmail is not connected.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      section.getByRole("button", { name: "Connect Gmail alice@gmail.com" }),
+    ).toBeInTheDocument();
+    expect(
+      section.queryByRole("button", { name: /^Disconnect/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a connected address without any credential material", async () => {
+    const { store, alice, bob, owner, identity } = await setupAlice();
+    const bobIdentity = await seedApprovedIdentity(
+      store,
+      owner,
+      bob.user,
+      "bob@gmail.com",
+    );
+    await store.saveGmailConnection(
+      connection(alice.user.id, identity.id, "alice@gmail.com"),
+    );
+    await store.saveGmailConnection(
+      connection(bob.user.id, bobIdentity.id, "bob@gmail.com"),
+    );
+    render(await DashboardPage(dashboardProps()));
+
+    const section = within(
+      screen.getByRole("region", { name: "Gmail accounts" }),
+    );
+    expect(section.getByText("CONNECTED")).toBeInTheDocument();
+    expect(
+      section.getByText("Approved by the owner and authorized by Google."),
+    ).toBeInTheDocument();
+    expect(
+      section.getByRole("button", { name: "Check connection alice@gmail.com" }),
+    ).toBeInTheDocument();
+    expect(
+      section.getByRole("button", { name: "Disconnect alice@gmail.com" }),
+    ).toBeInTheDocument();
+    expect(
+      section.queryByRole("button", { name: /^Connect Gmail/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("bob@gmail.com")).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toMatch(
+      /ENCRYPTED-DATA-KEY|CIPHERTEXT-VALUE|AUTH-TAG|IV-VALUE|credentials/,
+    );
+  });
+
+  it("asks to reconnect when Google revoked access", async () => {
+    const { store, alice, identity } = await setupAlice();
+    await store.saveGmailConnection(
+      connection(
+        alice.user.id,
+        identity.id,
+        "alice@gmail.com",
+        "REAUTH_REQUIRED",
+      ),
+    );
+    render(await DashboardPage(dashboardProps()));
+
+    expect(screen.getByText("REAUTH REQUIRED")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reconnect alice@gmail.com" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows only fixed messages for result codes", async () => {
+    await setupAlice();
+    render(await DashboardPage(dashboardProps({ gmail: "email-mismatch" })));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The Google account you chose is not the approved address.",
+    );
+  });
+
+  it("ignores unknown result codes", async () => {
+    await setupAlice();
+    render(await DashboardPage(dashboardProps({ gmail: "<b>injected</b>" })));
+    expect(screen.getByRole("alert")).toBeEmptyDOMElement();
+    expect(document.body.innerHTML).not.toContain("injected");
+  });
+
+  it("explains that approval comes first", async () => {
+    const { store, owner } = await seedOwner();
+    const { token } = await seedUser(store, owner, "new@example.com");
+    next.store = store;
+    signIn(token);
+    render(await DashboardPage(dashboardProps()));
+    expect(
+      screen.getByText(/No approved sender identities yet/),
+    ).toBeInTheDocument();
   });
 });
 

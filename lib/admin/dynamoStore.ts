@@ -12,7 +12,9 @@ import {
 import {
   countUsedSeats,
   effectiveInvitationStatus,
+  type GmailConnection,
   type Invitation,
+  type OAuthState,
   type SenderIdentity,
   type Session,
   type User,
@@ -34,6 +36,8 @@ import type { AdminStore } from "@/lib/admin/store";
  * | ATTEMPT      | key         | Failed-attempt window, `expiresAtEpoch`   |
  * | SENDER       | id          | SenderIdentity                            |
  * | SENDER_EMAIL | email       | `identityId`: one claimant per address    |
+ * | OAUTH_STATE  | state hash  | OAuthState, `expiresAtEpoch` (TTL)        |
+ * | GMAIL        | identity id | GmailConnection (encrypted credentials)   |
  *
  * Reads that decide authorization are strongly consistent.
  */
@@ -47,6 +51,8 @@ const keys = {
   attempt: (key: string) => ({ pk: "ATTEMPT", sk: key }),
   sender: (id: string) => ({ pk: "SENDER", sk: id }),
   senderEmail: (email: string) => ({ pk: "SENDER_EMAIL", sk: email }),
+  oauthState: (stateHash: string) => ({ pk: "OAUTH_STATE", sk: stateHash }),
+  gmail: (senderIdentityId: string) => ({ pk: "GMAIL", sk: senderIdentityId }),
 };
 
 const notExists = "attribute_not_exists(pk)";
@@ -536,6 +542,51 @@ export function createDynamoStore(
         if (isConditionFailure(error) || failedConditions(error)) return false;
         throw error;
       }
+    },
+
+    async createOAuthState(state) {
+      await client.send(
+        new PutCommand({
+          TableName,
+          Item: {
+            ...keys.oauthState(state.stateHash),
+            ...state,
+            expiresAtEpoch: epochSeconds(state.expiresAt),
+          },
+          ConditionExpression: notExists,
+        }),
+      );
+    },
+
+    async takeOAuthState(stateHash) {
+      const { Attributes } = await client.send(
+        new DeleteCommand({
+          TableName,
+          Key: keys.oauthState(stateHash),
+          ReturnValues: "ALL_OLD",
+        }),
+      );
+      return strip<OAuthState>(Attributes);
+    },
+
+    getGmailConnection(senderIdentityId) {
+      return get<GmailConnection>(keys.gmail(senderIdentityId));
+    },
+
+    listGmailConnectionsForUser(userId) {
+      return queryAll<GmailConnection>("GMAIL", {
+        FilterExpression: "userId = :userId",
+        ExpressionAttributeValues: { ":userId": userId },
+      });
+    },
+
+    async saveGmailConnection(connection) {
+      await client.send(
+        new PutCommand({
+          TableName,
+          Item: { ...keys.gmail(connection.senderIdentityId), ...connection },
+        }),
+      );
     },
   };
 }

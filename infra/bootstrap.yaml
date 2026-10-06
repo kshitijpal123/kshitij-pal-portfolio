@@ -97,6 +97,15 @@ Resources:
               - dynamodb:DeleteItem
               - dynamodb:Query
             Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*"
+          # Gmail credential data keys only; the key policy names the exact key.
+          - Effect: Allow
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:purpose: gmail-oauth-refresh-token
 
   # Assumed by CloudFormation to create and update the application stack.
   CloudFormationExecutionRole:
@@ -199,6 +208,29 @@ Resources:
                   - dynamodb:UntagResource
                   - dynamodb:ListTagsOfResource
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*"
+              # Key IDs are random, so CreateKey has no resource to scope to.
+              # Administration only: no Encrypt, Decrypt, or data-key actions.
+              - Sid: CreateGmailTokenKey
+                Effect: Allow
+                Action: kms:CreateKey
+                Resource: "*"
+              - Sid: ManageGmailTokenKey
+                Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GetKeyPolicy
+                  - kms:PutKeyPolicy
+                  - kms:GetKeyRotationStatus
+                  - kms:EnableKeyRotation
+                  - kms:DisableKeyRotation
+                  - kms:UpdateKeyDescription
+                  - kms:ListResourceTags
+                  - kms:TagResource
+                  - kms:UntagResource
+                  - kms:EnableKey
+                  - kms:DisableKey
+                  - kms:ScheduleKeyDeletion
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
               - Sid: AssetsBucket
                 Effect: Allow
                 Action:

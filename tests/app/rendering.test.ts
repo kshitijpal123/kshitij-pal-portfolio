@@ -21,6 +21,7 @@ describe("server and client boundaries", () => {
   it("limits Client Components to interaction, theme, and motion", () => {
     expect(sourceFiles("components").filter(isClient)).toEqual([
       "components/admin/AcceptInvitationForm.tsx",
+      "components/admin/GmailConnectButton.tsx",
       "components/admin/InviteForm.tsx",
       "components/admin/LoginForm.tsx",
       "components/admin/SenderRequestForm.tsx",

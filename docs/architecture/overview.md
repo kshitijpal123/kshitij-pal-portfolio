@@ -26,9 +26,10 @@ form" below).
 
 The same application also hosts a private, invitation-only mail console
 under `/admin`. It has its own authentication, roles, and a DynamoDB table,
-and is not linked from or indexed with the public site. Milestone 1 of the
-console (accounts, invitations, and sender identity approval) exists; it
-sends no email yet. See [`mail-console.md`](mail-console.md).
+and is not linked from or indexed with the public site. Milestones 1 and 2
+of the console (accounts, invitations, sender identity approval, and Gmail
+account connection through Google OAuth) exist; it sends no email yet. See
+[`mail-console.md`](mail-console.md).
 
 ## Layers
 
@@ -48,8 +49,9 @@ accessibility and performance conventions are described in
 [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 Environment variables are introduced only when a feature requires them: the
 three contact form settings, `SITE_URL` (the canonical origin), and the
-console's `ADMIN_TABLE_NAME` and `ADMIN_BOOTSTRAP_TOKEN`, all in
-`.env.example`.
+console's `ADMIN_TABLE_NAME`, `ADMIN_BOOTSTRAP_TOKEN`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and
+`GMAIL_TOKEN_KMS_KEY_ID`, all in `.env.example`.
 
 Production runs on AWS at `https://kshitijpal.in`: CloudFront in front of
 the Next.js standalone server on Lambda (through the AWS Lambda Web Adapter)

@@ -2,9 +2,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as actions from "@/lib/admin/actions";
 import { idleFormState } from "@/lib/admin/formState";
+import { completeGmailConnection } from "@/lib/admin/gmailConnections";
+import type { GoogleOAuthClient } from "@/lib/admin/googleOAuth";
 import { createMemoryStore } from "@/lib/admin/memoryStore";
 import type { AdminStore } from "@/lib/admin/store";
+import {
+  createLocalTokenCipher,
+  type TokenCipher,
+} from "@/lib/admin/tokenCipher";
 import { hashToken } from "@/lib/admin/tokens";
+import {
+  accessToken,
+  createFakeGoogle,
+  refreshToken,
+  seedApprovedIdentity,
+  stateFrom,
+} from "@/tests/helpers/gmail";
 import {
   ownerPassword,
   seedOwner,
@@ -20,6 +33,8 @@ const next = await vi.hoisted(async () => {
   return {
     mocks: createNextRequestMocks(),
     store: undefined as AdminStore | undefined,
+    google: null as GoogleOAuthClient | null,
+    cipher: null as TokenCipher | null,
   };
 });
 
@@ -29,6 +44,14 @@ vi.mock("next/cache", () => next.mocks.cache);
 vi.mock("next/server", () => next.mocks.server);
 vi.mock("@/lib/admin/getAdminStore", () => ({
   getAdminStore: () => next.store,
+}));
+vi.mock("@/lib/admin/googleOAuth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/admin/googleOAuth")>()),
+  getGoogleOAuthClient: () => next.google,
+}));
+vi.mock("@/lib/admin/tokenCipher", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/admin/tokenCipher")>()),
+  getTokenCipher: () => next.cipher,
 }));
 
 function jar() {
@@ -58,6 +81,8 @@ let logs: string[];
 
 beforeEach(() => {
   jar().clear();
+  next.google = null;
+  next.cipher = null;
   logs = [];
   for (const method of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
@@ -351,6 +376,185 @@ describe("setupOwnerAction", () => {
         form({ ...input, email: "second@example.com" }),
       ),
     ).toMatchObject({ status: "error", message: "Setup is not available." });
+  });
+});
+
+describe("Gmail actions", () => {
+  async function gmailSetup() {
+    const { store, owner, ownerToken } = await seedOwner();
+    const alice = await seedUser(store, owner, "alice@example.com");
+    const bob = await seedUser(store, owner, "bob@example.com");
+    const identity = await seedApprovedIdentity(
+      store,
+      owner,
+      alice.user,
+      "alice@gmail.com",
+    );
+    const google = createFakeGoogle({ issuedAt: new Date() });
+    next.store = store;
+    next.google = google.client;
+    next.cipher = createLocalTokenCipher();
+    return { store, owner, ownerToken, alice, bob, identity, google };
+  }
+
+  async function connectAlice(context: Awaited<ReturnType<typeof gmailSetup>>) {
+    signIn(context.alice.token);
+    const url = await navigation(
+      actions.startGmailConnectionAction(
+        form({ identityId: context.identity.id }),
+      ),
+    );
+    expect(
+      await completeGmailConnection(
+        {
+          store: context.store,
+          google: context.google.client,
+          cipher: next.cipher!,
+        },
+        {
+          actor: context.alice.user,
+          sessionToken: context.alice.token,
+          state: stateFrom(url),
+          code: "code",
+          error: null,
+        },
+        new Date(),
+      ),
+    ).toBe("connected");
+  }
+
+  it("sends the user to Google for their own approved identity", async () => {
+    const context = await gmailSetup();
+    signIn(context.alice.token);
+    const url = await navigation(
+      actions.startGmailConnectionAction(
+        form({ identityId: context.identity.id, userId: context.bob.user.id }),
+      ),
+    );
+
+    expect(url).toMatch(/^https:\/\/accounts\.google\.com\//);
+    const state = await context.store.takeOAuthState(hashToken(stateFrom(url)));
+    expect(state).toMatchObject({
+      userId: context.alice.user.id,
+      sessionHash: hashToken(context.alice.token),
+      senderIdentityId: context.identity.id,
+    });
+  });
+
+  it("refuses to start for another user's identity", async () => {
+    const context = await gmailSetup();
+    signIn(context.bob.token);
+    expect(
+      await navigation(
+        actions.startGmailConnectionAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    ).toBe("/admin?gmail=not-approved");
+    expect(context.google.calls.authorizationUrl).toHaveLength(0);
+  });
+
+  it("requires a session", async () => {
+    await gmailSetup();
+    for (const action of [
+      actions.startGmailConnectionAction,
+      actions.verifyGmailConnectionAction,
+      actions.disconnectGmailAction,
+    ]) {
+      expect(await navigation(action(form({ identityId: "x" })))).toBe(
+        "/admin/login",
+      );
+    }
+  });
+
+  it("reports an unconfigured server instead of starting", async () => {
+    const context = await gmailSetup();
+    next.google = null;
+    signIn(context.alice.token);
+    expect(
+      await navigation(
+        actions.startGmailConnectionAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    ).toBe("/admin?gmail=unavailable");
+  });
+
+  it("checks and disconnects only the user's own connection", async () => {
+    const context = await gmailSetup();
+    await connectAlice(context);
+
+    signIn(context.bob.token);
+    for (const action of [
+      actions.verifyGmailConnectionAction,
+      actions.disconnectGmailAction,
+    ]) {
+      expect(
+        await navigation(action(form({ identityId: context.identity.id }))),
+      ).toBe("/admin?gmail=not-found");
+    }
+    expect(
+      (await context.store.getGmailConnection(context.identity.id))?.status,
+    ).toBe("CONNECTED");
+
+    signIn(context.alice.token);
+    expect(
+      await navigation(
+        actions.verifyGmailConnectionAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    ).toBe("/admin?gmail=verified");
+    expect(
+      await navigation(
+        actions.disconnectGmailAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    ).toBe("/admin?gmail=disconnected");
+    expect(
+      await context.store.getGmailConnection(context.identity.id),
+    ).toMatchObject({ status: "DISCONNECTED", credentials: null });
+  });
+
+  it("never returns or logs OAuth credentials", async () => {
+    const context = await gmailSetup();
+    await connectAlice(context);
+    const destinations = [
+      await navigation(
+        actions.verifyGmailConnectionAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    ];
+
+    next.store = {
+      ...context.store,
+      getGmailConnection: async () => {
+        throw new Error(`leak ${refreshToken} ${accessToken}`);
+      },
+    };
+    destinations.push(
+      await navigation(
+        actions.verifyGmailConnectionAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+      await navigation(
+        actions.disconnectGmailAction(
+          form({ identityId: context.identity.id }),
+        ),
+      ),
+    );
+
+    const output = destinations.join("\n") + logs.join("\n");
+    expect(output).not.toContain(refreshToken);
+    expect(output).not.toContain(accessToken);
+    expect(output).not.toMatch(/ciphertext|encryptedDataKey|ya29|1\/\//);
+    expect(logs).toEqual([
+      "[admin] Gmail connection check failed (Error).",
+      "[admin] Gmail disconnect failed (Error).",
+    ]);
   });
 });
 
