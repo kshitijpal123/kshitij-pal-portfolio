@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "@/next.config";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 async function allPathHeaders() {
   const rules = (await nextConfig.headers?.()) ?? [];
@@ -43,5 +48,25 @@ describe("next.config", () => {
     expect(policy).toContain("ContentTypeOptions:");
     expect(policy).toContain("ReferrerPolicy: strict-origin-when-cross-origin");
     expect(policy).toContain("Value: camera=(), microphone=(), geolocation=()");
+  });
+
+  it("asks search engines not to index the private console", async () => {
+    const rules = (await nextConfig.headers?.()) ?? [];
+    expect(rules.find((rule) => rule.source === "/admin/:path*")).toEqual({
+      source: "/admin/:path*",
+      headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+    });
+  });
+
+  it("accepts Server Actions only from the app's own origin by default", () => {
+    expect(nextConfig.experimental?.serverActions?.allowedOrigins).toEqual([]);
+  });
+
+  it("accepts Server Actions from the public SITE_URL host behind CloudFront", async () => {
+    vi.stubEnv("SITE_URL", "https://portfolio.test");
+    const { default: config } = await import("@/next.config");
+    expect(config.experimental?.serverActions?.allowedOrigins).toEqual([
+      "portfolio.test",
+    ]);
   });
 });

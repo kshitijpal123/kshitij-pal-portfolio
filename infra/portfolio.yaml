@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Portfolio production: CloudFront in front of the Next.js standalone server on
-  AWS Lambda (function URL, Lambda Web Adapter) and an S3 bucket for
-  /_next/static. Deployed by GitHub Actions; see docs/architecture/deployment.md.
+  AWS Lambda (function URL, Lambda Web Adapter), an S3 bucket for
+  /_next/static, and a DynamoDB table for the private console. Deployed by
+  GitHub Actions; see docs/architecture/deployment.md.
 
 Parameters:
   LambdaAdapterLayerVersion:
@@ -22,8 +23,41 @@ Parameters:
     Type: String
     Description: Resend-verified sender, for example "Portfolio <contact@domain.tld>".
     Default: ""
+  AdminBootstrapToken:
+    Type: String
+    Description: >-
+      One-time private console setup token (32+ characters). Empty, the default,
+      closes /admin/setup; it also closes for good once the OWNER exists.
+    Default: ""
+    NoEcho: true
 
 Resources:
+  # Private mail console data (users, invitations, sessions, sender identities).
+  # Retained if the stack is deleted or the table would be replaced.
+  AdminTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${AWS::StackName}-admin"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAtEpoch
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      DeletionProtectionEnabled: true
+
   AssetsBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -85,6 +119,19 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !GetAtt ServerLogGroup.Arn
+        # Item access to the one table; transactions use these same actions.
+        - PolicyName: admin-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource: !GetAtt AdminTable.Arn
 
   ServerFunction:
     Type: AWS::Lambda::Function
@@ -111,6 +158,8 @@ Resources:
           RESEND_API_KEY: !Ref ResendApiKey
           CONTACT_TO_EMAIL: !Ref ContactToEmail
           CONTACT_FROM_EMAIL: !Ref ContactFromEmail
+          ADMIN_TABLE_NAME: !Ref AdminTable
+          ADMIN_BOOTSTRAP_TOKEN: !Ref AdminBootstrapToken
 
   # AWS_IAM (CloudFront origin access control) would require browsers to sign
   # POST bodies with x-amz-content-sha256, which the contact form cannot do.
@@ -256,3 +305,5 @@ Outputs:
     Value: !Ref AssetsBucket
   ServerFunctionName:
     Value: !Ref ServerFunction
+  AdminTableName:
+    Value: !Ref AdminTable

@@ -38,13 +38,19 @@ Why this architecture: [ADR 0002](../adr/0002-aws-lambda-cloudfront-hosting.md).
 | S3              | `portfolio-production-assets-<acct>-<rgn>`    | `/_next/static/*` (hashed, immutable)                         |
 | S3              | `portfolio-production-artifacts-<acct>-…`     | Lambda code packages uploaded by `aws cloudformation package` |
 | CloudWatch Logs | `/aws/lambda/portfolio-production-server`     | Server logs, 30-day retention                                 |
+| DynamoDB        | `portfolio-production-admin`                  | Private mail console data (see `mail-console.md`)             |
 | IAM             | Roles and a permissions boundary              | OIDC deploy role, CloudFormation role, Lambda role            |
 | CloudFormation  | `portfolio-bootstrap`, `portfolio-production` | Everything above, as code                                     |
 
 Outside the templates, managed by hand: the Route 53 hosted zone for
 `kshitijpal.in`, the ACM certificate, and the distribution's alias (see
 "Custom domain"). Nothing else: no API Gateway, load balancer, container,
-database, queue, or WAF. Production runs in `ap-south-1` (Mumbai), chosen
+relational database, queue, or WAF.
+
+The console table (`AdminTable`) is on-demand, with point-in-time recovery
+and deletion protection, and `DeletionPolicy: Retain`, so neither a stack
+deletion nor a replacement removes its data. Sessions and login-attempt
+items expire through its `expiresAtEpoch` TTL. Production runs in `ap-south-1` (Mumbai), chosen
 with the `AWS_REGION` variable. CloudFront is global and uses
 `PriceClass_200`, which includes edge locations in India.
 
@@ -91,6 +97,7 @@ cd .aws-build/server && PORT=8000 node server.js
 | `/sitemap.xml`, `/robots.txt` | Lambda    | Same as prerendered pages             | Cached until the next deploy                |
 | `public/` files, the résumé   | Lambda    | `public, max-age=0` with an `ETag`    | Not cached; browsers revalidate             |
 | `/api/contact`, 404s          | Lambda    | none, or `private, no-store`          | Never cached                                |
+| `/admin/*` (dynamic)          | Lambda    | `private, no-cache, no-store`         | Never cached; cookies reach the origin      |
 
 - The server cache policy keys on every query string (`_rsc`) and the
   `rsc`, `next-router-prefetch`, `next-router-state-tree`,
@@ -138,14 +145,16 @@ Revisit it when analytics or monitoring adds third-party scripts.
 
 ## Secrets and environment variables
 
-| Name                                                                         | Kind                | Where it lives               | Used by                                |
-| ---------------------------------------------------------------------------- | ------------------- | ---------------------------- | -------------------------------------- |
-| `SITE_URL`                                                                   | Build-time, public  | GitHub environment variable  | `next build` (canonical URLs, sitemap) |
-| `RESEND_API_KEY`                                                             | Runtime, **secret** | GitHub environment secret    | Lambda environment → `/api/contact`    |
-| `CONTACT_TO_EMAIL`                                                           | Runtime             | GitHub environment variable  | Lambda environment → `/api/contact`    |
-| `CONTACT_FROM_EMAIL`                                                         | Runtime             | GitHub environment variable  | Lambda environment → `/api/contact`    |
-| `AWS_REGION`                                                                 | Deployment          | GitHub environment variable  | Workflow                               |
-| `AWS_DEPLOY_ROLE_ARN`, `AWS_CLOUDFORMATION_ROLE_ARN`, `AWS_ARTIFACTS_BUCKET` | Deployment          | GitHub environment variables | Workflow                               |
+| Name                                                                         | Kind                | Where it lives                                      | Used by                                |
+| ---------------------------------------------------------------------------- | ------------------- | --------------------------------------------------- | -------------------------------------- |
+| `SITE_URL`                                                                   | Build-time, public  | GitHub environment variable                         | `next build` (canonical URLs, sitemap) |
+| `RESEND_API_KEY`                                                             | Runtime, **secret** | GitHub environment secret                           | Lambda environment → `/api/contact`    |
+| `CONTACT_TO_EMAIL`                                                           | Runtime             | GitHub environment variable                         | Lambda environment → `/api/contact`    |
+| `CONTACT_FROM_EMAIL`                                                         | Runtime             | GitHub environment variable                         | Lambda environment → `/api/contact`    |
+| `ADMIN_BOOTSTRAP_TOKEN`                                                      | Runtime, **secret** | GitHub environment secret, only while bootstrapping | Lambda environment → `/admin/setup`    |
+| `ADMIN_TABLE_NAME`                                                           | Runtime             | Set by the template                                 | Lambda environment → `/admin`          |
+| `AWS_REGION`                                                                 | Deployment          | GitHub environment variable                         | Workflow                               |
+| `AWS_DEPLOY_ROLE_ARN`, `AWS_CLOUDFORMATION_ROLE_ARN`, `AWS_ARTIFACTS_BUCKET` | Deployment          | GitHub environment variables                        | Workflow                               |
 
 - There are no AWS access keys anywhere. The deploy job exchanges its GitHub
   OIDC token for a one-hour session on `github-deploy-portfolio-production`.
@@ -158,6 +167,11 @@ Revisit it when analytics or monitoring adds third-party scripts.
   Lambda encrypts it at rest. GitHub masks it in logs, and CloudFormation
   never displays it. Anyone with `lambda:GetFunctionConfiguration` on the
   function can read it, so keep console access to the account limited.
+- `ADMIN_BOOTSTRAP_TOKEN` takes the same `NoEcho` path. It exists only to
+  create the console's OWNER: add it, deploy, create the OWNER, then delete
+  the secret and deploy again (an unset secret deploys as an empty value,
+  which turns bootstrap off). See "OWNER bootstrap" in
+  [`mail-console.md`](mail-console.md).
 - None of these values are `NEXT_PUBLIC_`, so none reach the browser.
 - Nothing secret is in the repository, `.env.example`, the templates, or
   this document. `.env*` files are git-ignored and stripped from the Lambda
@@ -165,13 +179,17 @@ Revisit it when analytics or monitoring adds third-party scripts.
 
 ## IAM (least privilege)
 
-- **Lambda execution role.** It may only write to its own log group. A
+- **Lambda execution role.** It may write to its own log group and perform
+  `GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, and `Query` on the
+  console table only (no `Scan`, batch, or table-level actions). A
   permissions boundary (`portfolio-production-lambda-boundary`, created by the
   bootstrap stack) caps it at that, whatever the application template
   requests.
 - **CloudFormation execution role** (`cfn-exec-portfolio-production`). It
   manages only the application stack's resources: functions, roles, and log
-  groups named `portfolio-production-*`, and the assets bucket. It can create
+  groups named `portfolio-production-*`, tables named
+  `portfolio-production-*` (create, update, delete, TTL, backups, tags), and
+  the assets bucket. It can create
   roles only with the boundary attached, and pass them only to Lambda.
   CloudFront policy actions use `*` where CloudFront has no resource-level
   permissions.
@@ -301,6 +319,26 @@ Update the `SITE_URL` environment variable, then re-run the latest workflow
 or push. It is read only at build time, and a malformed value fails the
 build rather than publishing wrong URLs.
 
+### First deploy of the mail console
+
+The console added a DynamoDB table and new permissions in both templates.
+**Update the bootstrap stack before pushing the application change**:
+without it, the CloudFormation role cannot create the table (the deploy
+fails and rolls back), and the permissions boundary would deny the
+function's table access. With administrator credentials:
+
+```bash
+aws cloudformation deploy \
+  --region ap-south-1 \
+  --stack-name portfolio-bootstrap \
+  --template-file infra/bootstrap.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+(Existing parameter values are kept.) Then push, and follow "OWNER
+bootstrap" in [`mail-console.md`](mail-console.md) to create the OWNER. The
+`Distribution` resource is unchanged, so the custom domain is unaffected.
+
 ### Rotating the Resend key
 
 Update the `RESEND_API_KEY` secret, then re-run the latest workflow. The
@@ -384,7 +422,9 @@ personal portfolio's traffic normally stays within them. Most requests are
 answered from the CloudFront cache without invoking Lambda. What remains is
 small S3 storage (static assets and 30 days of packages), CloudWatch Logs
 ingestion with 30-day retention, and invalidations, which are within the
-free allowance at one per deploy. Check current AWS pricing for figures.
+free allowance at one per deploy. The console table is on-demand with no
+provisioned capacity, so at five users its requests, storage, and
+point-in-time recovery are negligible. Check current AWS pricing for figures.
 A budget alarm is worth adding in the AWS Billing console. It is not in
 the templates.
 

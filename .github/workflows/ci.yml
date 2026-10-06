@@ -119,6 +119,8 @@ jobs:
       - name: Deploy stack
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Optional; empty keeps /admin/setup closed. Remove it after setup.
+          ADMIN_BOOTSTRAP_TOKEN: ${{ secrets.ADMIN_BOOTSTRAP_TOKEN }}
         run: |
           aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
@@ -129,7 +131,8 @@ jobs:
             --parameter-overrides \
               "ResendApiKey=$RESEND_API_KEY" \
               "ContactToEmail=$CONTACT_TO_EMAIL" \
-              "ContactFromEmail=$CONTACT_FROM_EMAIL"
+              "ContactFromEmail=$CONTACT_FROM_EMAIL" \
+              "AdminBootstrapToken=$ADMIN_BOOTSTRAP_TOKEN"
 
       - name: Read stack outputs
         id: stack

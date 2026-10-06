@@ -20,6 +20,11 @@ describe("server and client boundaries", () => {
 
   it("limits Client Components to interaction, theme, and motion", () => {
     expect(sourceFiles("components").filter(isClient)).toEqual([
+      "components/admin/AcceptInvitationForm.tsx",
+      "components/admin/InviteForm.tsx",
+      "components/admin/LoginForm.tsx",
+      "components/admin/SenderRequestForm.tsx",
+      "components/admin/SetupForm.tsx",
       "components/contact/ContactForm.tsx",
       "components/experience/JourneyTrajectory.tsx",
       "components/hero/TechnicalHeroVisual.tsx",
@@ -33,12 +38,28 @@ describe("server and client boundaries", () => {
     ]);
   });
 
-  it("keeps SEO and content modules out of the client", () => {
+  it("keeps SEO, content, and console modules out of the client", () => {
     expect(
-      [...sourceFiles("lib/seo"), ...sourceFiles("lib/content")].filter(
-        isClient,
-      ),
+      [
+        ...sourceFiles("lib/seo"),
+        ...sourceFiles("lib/content"),
+        ...sourceFiles("lib/admin"),
+      ].filter(isClient),
     ).toEqual([]);
+  });
+});
+
+describe("private console rendering", () => {
+  it("renders every console page per request, never prerendered or cached", () => {
+    const pages = sourceFiles("app/admin").filter((file) =>
+      file.endsWith("/page.tsx"),
+    );
+    expect(pages).toHaveLength(7);
+    for (const file of pages) {
+      expect(readFileSync(file, "utf8"), file).toMatch(
+        /from "@\/lib\/admin\/session"/,
+      );
+    }
   });
 });
 

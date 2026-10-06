@@ -19,10 +19,16 @@ Next.js
 ```
 
 The portfolio is a single Next.js application. There is no separate backend,
-API server, database, CMS, or authentication layer; none of these are required
-for the problem being solved. The one server-side endpoint is the contact
-form's Route Handler, `POST /api/contact`, which relays messages through
-Resend (see "Contact form" below).
+API server, or CMS. The public site needs no database or authentication; its
+one server-side endpoint is the contact form's Route Handler,
+`POST /api/contact`, which relays messages through Resend (see "Contact
+form" below).
+
+The same application also hosts a private, invitation-only mail console
+under `/admin`. It has its own authentication, roles, and a DynamoDB table,
+and is not linked from or indexed with the public site. Milestone 1 of the
+console (accounts, invitations, and sender identity approval) exists; it
+sends no email yet. See [`mail-console.md`](mail-console.md).
 
 ## Layers
 
@@ -41,7 +47,8 @@ Metadata, canonical URLs, the sitemap, robots, structured data, and the
 accessibility and performance conventions are described in
 [`seo-accessibility-performance.md`](seo-accessibility-performance.md).
 Environment variables are introduced only when a feature requires them: the
-three contact form settings and `SITE_URL`, the canonical origin, all in
+three contact form settings, `SITE_URL` (the canonical origin), and the
+console's `ADMIN_TABLE_NAME` and `ADMIN_BOOTSTRAP_TOKEN`, all in
 `.env.example`.
 
 Production runs on AWS at `https://kshitijpal.in`: CloudFront in front of
@@ -71,8 +78,10 @@ app/                 layout.tsx (global shell), page.tsx (Home), globals.css,
                      engineering/page.tsx (index), engineering/[slug]/page.tsx (article),
                      experience/page.tsx, about/page.tsx, contact/page.tsx,
                      not-found.tsx, sitemap.ts, robots.ts,
-                     api/contact/route.ts (contact form endpoint)
+                     api/contact/route.ts (contact form endpoint),
+                     admin/ (private mail console, see mail-console.md)
 components/ui/       Core UI primitives (Button, Link, Container, ...)
+components/admin/    Console shell, lists, and forms
 components/hero/     HomeHero, TechnicalHeroVisual
 components/experience/  ExperienceSection (Home journey), JourneyTrajectory,
                      JourneyMilestone, JourneyMarker, ExperienceRole,
@@ -90,6 +99,7 @@ content/about/       index.mdx (About page body)
 lib/content/         projects.ts, engineering.ts (types and registries)
 lib/contact/         validation.ts (shared), email.ts, rateLimit.ts,
                      sendContactEmail.ts (server only)
+lib/admin/           Console domain, auth, sessions, stores, Server Actions
 lib/seo/             siteUrl.ts, metadata.ts, structuredData.ts, sitemap.ts,
                      robots.ts
 components/layout/   SiteHeader, SiteFooter
@@ -129,7 +139,9 @@ Full conventions: [`project-structure.md`](project-structure.md).
 `/`, `/work`, `/work/[slug]`, `/engineering`, `/engineering/[slug]`,
 `/experience`, `/about`, and `/contact` exist; `/work/billsync` is the first
 case study. `/api/contact` is the only Route Handler; `/sitemap.xml` and
-`/robots.txt` are prerendered metadata routes. Routes are
+`/robots.txt` are prerendered metadata routes. The private `/admin` routes
+render per request and are excluded from navigation, the sitemap, and
+indexing. Routes are
 created together with the content or feature they serve, never as
 placeholders. Content routes are statically generated, with the `[slug]`
 matching the content directory name; unknown slugs return 404.

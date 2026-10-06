@@ -1,5 +1,6 @@
 import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
+import { parseSiteUrl } from "@/lib/seo/siteUrl";
 
 /*
  * Only headers that cannot affect rendering. A Content Security Policy is
@@ -19,12 +20,30 @@ const securityHeaders = [
   },
 ];
 
+/*
+ * CloudFront forwards the Lambda function URL as `Host`, so Server Actions'
+ * CSRF check (Origin host must equal the app's host) needs the public origin
+ * from `SITE_URL` listed explicitly.
+ */
+const siteOrigin = parseSiteUrl(process.env.SITE_URL);
+
 const nextConfig: NextConfig = {
   // The AWS Lambda package is `.next/standalone`; see docs/architecture/deployment.md.
   output: "standalone",
   poweredByHeader: false,
+  experimental: {
+    serverActions: {
+      allowedOrigins: siteOrigin ? [new URL(siteOrigin).host] : [],
+    },
+  },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      {
+        source: "/admin/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+    ];
   },
 };
 
