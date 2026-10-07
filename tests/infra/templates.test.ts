@@ -220,7 +220,7 @@ describe("scheduled send infrastructure", () => {
     expect(role).toContain("Service: scheduler.amazonaws.com");
     expect(role).toContain("aws:SourceAccount: !Ref AWS::AccountId");
     expect(role).toContain(
-      'aws:SourceArn: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${AWS::StackName}-mail/*"',
+      'aws:SourceArn: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${AWS::StackName}-mail"',
     );
     expect(role).toContain("Action: lambda:InvokeFunction");
     expect(role).toContain("Resource: !GetAtt ScheduleFunction.Arn");
